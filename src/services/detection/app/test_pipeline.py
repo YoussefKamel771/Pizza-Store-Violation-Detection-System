@@ -10,10 +10,11 @@ from core.interfaces import IDetector, ITracker, IMessageBroker, IViolationRepos
 from domain.engine import ScooperViolationEngine
 from infrastructure.postgress_repo import PostgresRepository
 from helpers.config import get_settings, Settings
+from core.logging_config import setup_logger
+from main import DetectionManager
 import numpy as np
 from typing import List, Dict, Any
 import os
-from core.logging_config import setup_logger
 import logging
 import cv2
 
@@ -23,43 +24,6 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 logger.info(f"Loaded settings: {settings.model_dump()}")
-
-class DetectionManager:
-    def __init__(
-        self, 
-        detector: IDetector, 
-        tracker: ITracker,
-        engine: ScooperViolationEngine,
-        repo: IViolationRepository,
-    ):
-        self.detector = detector
-        self.tracker = tracker
-        self.engine = engine
-        self.repo = repo
-
-    def on_frame_received(self, frame: np.ndarray):
-
-        # 1. Detect objects (Hand, Person, Pizza, Scooper) 
-        raw_detections = self.detector.detect(frame)
-
-        # 2. Temporal Association (DeepSORT)
-        # Adds 'track_id' to each detection to distinguish between workers 
-        tracked_detections = self.tracker.update(raw_detections, frame) 
-        
-        # # 3. Violation Logic Engine
-        # # Pass the whole list so the engine can check Hand vs. Scooper vs. Pizza
-        violations = self.engine.process_frame(tracked_detections)
-        
-        # # 4. Reporting
-        for v in violations:
-            logger.info(f"Violation detected: {v}")
-            self.repo.save_violation(v)  
-            cv2.imwrite(v.frame_path, frame)  # Save frame for reference
-
-        return tracked_detections, violations     
-
-    # def start(self):
-    #     self.broker.subscribe(self.on_frame_received)
 
 
 def initialize_roi_manager(frame: np.ndarray, roi_manager: RoiManager) -> bool:

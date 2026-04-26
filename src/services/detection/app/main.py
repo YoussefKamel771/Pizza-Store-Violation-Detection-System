@@ -1,7 +1,14 @@
+import logging
+
+import cv2
+
 from core.interfaces import IDetector, ITracker, IMessageBroker, IViolationRepository
 from domain.engine import ScooperViolationEngine
 from typing import List, Dict, Any
 import numpy as np
+
+logger = logging.getLogger(__name__)
+
 
 class DetectionManager:
     def __init__(
@@ -33,10 +40,14 @@ class DetectionManager:
         
         # 4. Reporting
         for v in violations:
-            self.repo.save_violation(v) 
-            self.broker.publish("alerts", v)
+            logger.info(f"Violation detected: {v}")
+            self.repo.save_violation(v)  
+            cv2.imwrite(v.frame_path, frame)  # Save frame for reference 
+            # self.broker.publish("alerts", v)
         
-        self.broker.publish("streaming_service", {"violations": violations})
+        # self.broker.publish("streaming_service", {"violations": violations})
+        
+        return tracked_detections, violations 
 
     def start(self):
         self.broker.subscribe(self.on_frame_received)
