@@ -1,9 +1,9 @@
 # from deep_sort_realtime.deepsort_tracker import DeepSort
 from src.services.detection.app.core.interfaces import ITracker
-from services.detection.app.deep_sort_pytorch.deep_sort import DeepSort
+from deep_sort_pytorch.deep_sort import DeepSort
 import torch
 
-from services.detection.app.deep_sort_pytorch.utils.parser import get_config
+from deep_sort_pytorch.utils.parser import get_config
 
 
 class DeepSortTracker(ITracker):

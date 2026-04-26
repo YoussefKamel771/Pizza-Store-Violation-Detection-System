@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-from services.detection.app.infrastructure.roi_manager import RoiManager
+from infrastructure.roi_manager import RoiManager
 
 class Visualizer:
     def __init__(self):

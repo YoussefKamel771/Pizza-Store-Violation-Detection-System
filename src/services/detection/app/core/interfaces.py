@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 import numpy as np
 from typing import List, Dict, Any
 
+from models.db_schemas.violation import ViolationModel
+
 class IDetector(ABC):
     """Interface for object detection models (e.g., YOLO 12)"""
     @abstractmethod
@@ -31,5 +33,5 @@ class IMessageBroker(ABC):
 class IViolationRepository(ABC):
     """Interface for persisting violation data to a database or storage system."""
     @abstractmethod
-    def save_violation(self, violation_data: Dict[str, Any]):
+    def save_violation(self, violation_data: ViolationModel):
         pass

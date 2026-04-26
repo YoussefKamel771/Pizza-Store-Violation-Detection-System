@@ -1,10 +1,12 @@
 import cv2
+import torch
 from ultralytics import YOLO
-from services.detection.app.core.interfaces import IDetector
+from core.interfaces import IDetector
 
 class YOLO11Detector(IDetector):
     def __init__(self, model_path: str = '../best.pt'):
         # Load the pretrained YOLO 11 medium model 
+        torch.cuda.empty_cache()
         self.model = YOLO(model_path)
         # Expected classes: Hand, Person, Pizza, Scooper 
         self.classes = ['hand', 'person', 'pizza', 'scooper']

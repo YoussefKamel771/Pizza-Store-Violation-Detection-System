@@ -1,6 +1,7 @@
 import numpy as np
 from typing import List, Optional
-from services.detection.app.infrastructure.roi_manager import RoiManager, ROI
+from infrastructure.roi_manager import RoiManager, ROI
+from models.db_schemas.violation import ViolationModel
 
 class ScooperViolationEngine:
     def __init__(self, rois: List[ROI] = None, roi_manager: RoiManager = None, proximity_threshold=50):
@@ -81,12 +82,13 @@ class ScooperViolationEngine:
             if obj['label'] == 'hand':
                 status = self.update(obj['track_id'], obj, tracked_objects)
                 if status == "VIOLATION":
-                    violations.append({
-                        'worker_id': obj['track_id'],
-                        'type': 'scooper_violation',
-                        'message': f"Worker {obj['track_id']} handled ingredients without scooper",
-                        'bbox': obj['bbox']
-                    })
+                    violations.append(
+                        ViolationModel(
+                            track_id=obj['track_id'],
+                            violation_type='SCOOPER_VIOLATION',
+                            frame_path=f"./alerts/violation_{obj['track_id']}.jpg", # Can be set to actual frame path if needed
+                            detections=obj  # Store the detection info for reference
+                    ))
         
         # Restore original ROIs
         self.rois = original_rois

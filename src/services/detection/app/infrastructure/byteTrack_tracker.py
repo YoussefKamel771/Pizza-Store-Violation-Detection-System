@@ -1,6 +1,6 @@
 import numpy as np
 import supervision as sv
-from services.detection.app.core.interfaces import ITracker
+from core.interfaces import ITracker
 
 class ByteTrackTracker(ITracker):
     """
