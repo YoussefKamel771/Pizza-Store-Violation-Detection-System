@@ -1,5 +1,5 @@
-from app.core.interfaces import IDetector, ITracker, IMessageBroker, IViolationRepository
-from app.domain.engine import ScooperViolationEngine
+from core.interfaces import IDetector, ITracker, IMessageBroker, IViolationRepository
+from domain.engine import ScooperViolationEngine
 from typing import List, Dict, Any
 import numpy as np
 

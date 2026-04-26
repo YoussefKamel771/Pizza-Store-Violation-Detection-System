@@ -1,16 +1,28 @@
 import cv2
 import json
-from services.detection.app.infrastructure.detector import YOLO11Detector
 # from services.detection.app.infrastructure.deepsort_tracker import DeepSortTracker
-from services.detection.app.infrastructure.byteTrack_tracker import ByteTrackTracker
-from services.detection.app.domain.engine import ScooperViolationEngine
-from services.detection.app.infrastructure.visualization import Visualizer
-from services.detection.app.infrastructure.roi_manager import RoiManager   
-from services.detection.app.core.interfaces import IDetector, ITracker, IMessageBroker, IViolationRepository
-from services.detection.app.domain.engine import ScooperViolationEngine
+from infrastructure.detector import YOLO11Detector
+from infrastructure.byteTrack_tracker import ByteTrackTracker
+from domain.engine import ScooperViolationEngine
+from infrastructure.visualization import Visualizer
+from infrastructure.roi_manager import RoiManager   
+from core.interfaces import IDetector, ITracker, IMessageBroker, IViolationRepository
+from domain.engine import ScooperViolationEngine
+from infrastructure.postgress_repo import PostgresRepository
+from helpers.config import get_settings, Settings
 import numpy as np
 from typing import List, Dict, Any
 import os
+from core.logging_config import setup_logger
+import logging
+import cv2
+
+setup_logger()
+
+logger = logging.getLogger(__name__)
+
+settings = get_settings()
+logger.info(f"Loaded settings: {settings.model_dump()}")
 
 class DetectionManager:
     def __init__(
@@ -18,10 +30,12 @@ class DetectionManager:
         detector: IDetector, 
         tracker: ITracker,
         engine: ScooperViolationEngine,
+        repo: IViolationRepository,
     ):
         self.detector = detector
         self.tracker = tracker
         self.engine = engine
+        self.repo = repo
 
     def on_frame_received(self, frame: np.ndarray):
 
@@ -38,14 +52,15 @@ class DetectionManager:
         
         # # 4. Reporting
         for v in violations:
-            print(f"Violation Detected: {v}")   
+            logger.info(f"Violation detected: {v}")
+            self.repo.save_violation(v)  
+            cv2.imwrite(v.frame_path, frame)  # Save frame for reference
 
         return tracked_detections, violations     
 
     # def start(self):
     #     self.broker.subscribe(self.on_frame_received)
 
-ROI_CONFIG_PATH = "config/rois.json"
 
 def initialize_roi_manager(frame: np.ndarray, roi_manager: RoiManager) -> bool:
     """
@@ -53,9 +68,9 @@ def initialize_roi_manager(frame: np.ndarray, roi_manager: RoiManager) -> bool:
     Returns True if ROIs are ready.
     """
     # Try loading existing config first
-    if os.path.exists(ROI_CONFIG_PATH):
-        print(f"Found existing ROI config at {ROI_CONFIG_PATH}")
-        success = roi_manager.load_rois_from_file(ROI_CONFIG_PATH)
+    if os.path.exists(settings.roi_config_path):
+        print(f"Found existing ROI config at {settings.roi_config_path}")
+        success = roi_manager.load_rois_from_file(settings.roi_config_path)
         if success and len(roi_manager.rois) > 0:
             return True
     
@@ -65,8 +80,8 @@ def initialize_roi_manager(frame: np.ndarray, roi_manager: RoiManager) -> bool:
     
     if success:
         # Immediately save for next run
-        roi_manager.save_rois_to_file(ROI_CONFIG_PATH)
-        print(f"ROIs saved to {ROI_CONFIG_PATH}")
+        roi_manager.save_rois_to_file(settings.roi_config_path)
+        print(f"ROIs saved to {settings.roi_config_path}")
         return True
     
     return False
@@ -81,6 +96,7 @@ def run_local_test(video_path: str, model_path: str):
     )
     visualizer = Visualizer()
     roi_manager = RoiManager()
+    repo = PostgresRepository(settings.conn_str)
 
 
     cap = cv2.VideoCapture(video_path)
@@ -100,6 +116,9 @@ def run_local_test(video_path: str, model_path: str):
     
     # Pass loaded ROIs to engine
     engine = ScooperViolationEngine(roi_manager=roi_manager)
+
+    manager = DetectionManager(detector, tracker, engine, repo)
+
  
 
     try:
@@ -108,7 +127,6 @@ def run_local_test(video_path: str, model_path: str):
             if not ret:
                 break
 
-            manager = DetectionManager(detector, tracker, engine)
             
             tracked_objs, violations = manager.on_frame_received(frame)
 
@@ -121,15 +139,15 @@ def run_local_test(video_path: str, model_path: str):
                 break
             elif key == ord('s'):
                 # Manual save trigger
-                roi_manager.save_rois_to_file(ROI_CONFIG_PATH)
+                roi_manager.save_rois_to_file(settings.roi_config_path)
                 print("ROIs manually saved")
     finally:
         # Ensure ROIs are saved even if user closes window
-        roi_manager.save_rois_to_file(ROI_CONFIG_PATH)
+        roi_manager.save_rois_to_file(settings.roi_config_path)
         cap.release()
         cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
-    run_local_test(video_path='test_data/Sah w b3dha ghalt (3).mp4', model_path='weights/best.pt')
+    run_local_test(video_path=settings.test_video_path, model_path=settings.model_path)
 
