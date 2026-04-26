@@ -216,4 +216,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 
-assets/files/
+app.log
+weights
+test_data
+alerts
