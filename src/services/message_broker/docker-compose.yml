@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.8.3
+    container_name: kafka
+    ports:
+      - "9092:9092"   # Internal Docker network (used by other containers)
+      - "29092:29092" # External / host machine access (for testing locally)
+
+    environment:
+      KAFKA_KRAFT_MODE: 'true'
+
+      CLUSTER_ID: '1L6g7nGhU-eAKfL--X25wo'
+      KAFKA_NODE_ID: 1
+
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1 # 1 means No backup for metadata, just one copy
+
+      # ── Listeners ──────────────────────────────────────────────────────────
+      # Three listeners:
+      #   CONTROLLER  :9093  — internal KRaft leader election (never exposed)
+      #   INTERNAL   :9092  — host machine access (kafka, Kafka UI)
+      #   EXTERNAL    :29092 — Docker-network inter-service communication. used by your host machine (localhost:29092)
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+
+      # Auto-create topics on first publish (convenient for dev)
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+# ── Kafka UI (optional — remove in production) ────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      # Kafka UI runs on the host network side → use localhost:9092
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      DYNAMIC_CONFIG_ENABLED: 'true'
+    depends_on:
+      kafka:
+        condition: service_healthy
+    profiles:
+      # Only starts when you run: docker compose --profile dev up
+      - dev
