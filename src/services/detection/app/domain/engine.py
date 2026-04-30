@@ -2,6 +2,7 @@ import numpy as np
 from typing import List, Optional
 from infrastructure.roi_manager import RoiManager, ROI
 from models.db_schemas.violation import ViolationModel
+from datetime import datetime, timezone
 
 class ScooperViolationEngine:
     def __init__(self, rois: List[ROI] = None, roi_manager: RoiManager = None, proximity_threshold=50):
@@ -66,7 +67,7 @@ class ScooperViolationEngine:
         self.worker_states[worker_id] = state
         return "CLEAR"
 
-    def process_frame(self, tracked_objects: list, rois: List[ROI] = None) -> list:
+    def process_frame(self, tracked_objects: list, frame_id: int, timestamp: float, video_source: str, rois: List[ROI] = None) -> list:
         """
         Process full frame and return all violations.
         Optional rois override for per-frame dynamic ROI updates.
@@ -87,6 +88,10 @@ class ScooperViolationEngine:
                             track_id=obj['track_id'],
                             violation_type='SCOOPER_VIOLATION',
                             frame_path=f"./alerts/violation_{obj['track_id']}.jpg", # Can be set to actual frame path if needed
+                            frame_id=frame_id,  # Include frame_id if available
+                            timestamp=datetime.fromtimestamp(timestamp, tz=timezone.utc),  # Include timestamp if available
+                            video_source=video_source,  # Include video source if available
+                            roi_name=self.rois[0].name if self.rois else "unknown",  # Assuming single ROI for simplicity
                             detections=obj  # Store the detection info for reference
                     ))
         
