@@ -41,21 +41,3 @@ services:
       interval: 10s
       timeout: 10s
       retries: 10
-
-# ── Kafka UI (optional — remove in production) ────────────────────────────
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: kafka-ui
-    ports:
-      - "8080:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: local
-      # Kafka UI runs on the host network side → use localhost:9092
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
-      DYNAMIC_CONFIG_ENABLED: 'true'
-    depends_on:
-      kafka:
-        condition: service_healthy
-    profiles:
-      # Only starts when you run: docker compose --profile dev up
-      - dev
