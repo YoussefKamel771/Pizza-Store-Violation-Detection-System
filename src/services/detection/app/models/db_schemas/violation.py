@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean
 from sqlalchemy.ext.declarative import declarative_base
-from datetime import datetime
+from datetime import datetime, timezone
 
 Base = declarative_base()
 
@@ -9,11 +9,14 @@ class ViolationModel(Base):
     __tablename__ = 'violations'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    frame_id = Column(Integer, nullable=True)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     track_id = Column(Integer, nullable=False)
     violation_type = Column(String(50), default='SCOOPER_VIOLATION')
-    timestamp = Column(DateTime, default=datetime.utcnow)
     frame_path = Column(String(255), nullable=True)
     detections = Column(JSON, nullable=True)  # Stores the list of tracked objects
+    roi_name = Column(String(255), nullable=True)  # Optional: which ROI the violation occurred in
+    video_source = Column(String(255), nullable=True)  # Optional: which camera/video the violation came from
     is_resolved = Column(Boolean, default=False)
 
     def __repr__(self):
