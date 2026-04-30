@@ -27,7 +27,7 @@ class ByteTrackTracker(ITracker):
         self.label_to_id = {label: idx for idx, label in enumerate(self.classes)}
         self.id_to_label = {idx: label for label, idx in self.label_to_id.items()}
 
-    def update(self, detections: list, frame) -> list:
+    def update(self, detections: list) -> list:
         if not detections:
             # Supervision requires an empty Detections object if no objects are found
             sv_dets = sv.Detections.empty()
@@ -66,6 +66,7 @@ class ByteTrackTracker(ITracker):
             
             bbox = tracked_sv_dets.xyxy[i].tolist()
             class_id = tracked_sv_dets.class_id[i]
+            confidence = tracked_sv_dets.confidence[i]
             
             # Map integer ID back to string label
             label = self.id_to_label.get(class_id, "unknown")
@@ -74,6 +75,7 @@ class ByteTrackTracker(ITracker):
                 "track_id": int(track_id),
                 "bbox": bbox, # [x1, y1, x2, y2]
                 "label": label,
+                "confidence": confidence,
                 "centroid": self._get_centroid(bbox)
             })
             
