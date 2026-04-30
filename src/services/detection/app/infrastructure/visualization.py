@@ -1,7 +1,11 @@
+import logging
+
 import cv2
 import numpy as np
 
 from infrastructure.roi_manager import RoiManager
+
+logger = logging.getLogger(__name__)
 
 class Visualizer:
     def __init__(self):
@@ -17,6 +21,7 @@ class Visualizer:
         """
         # 1. Draw ROIs (Regions of Interest)
         for roi in roi_manager.rois:
+            # logger.debug("Drawing ROI %s with color %s", roi.name, roi.color)
             roi.draw(frame)
 
         # 2. Draw Tracked Objects
