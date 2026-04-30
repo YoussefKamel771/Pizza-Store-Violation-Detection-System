@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 
@@ -39,5 +39,27 @@ class PostgresRepository(IViolationRepository):
             session.rollback()
             logger.error(f"Error saving violation: {e}")
             raise
+        finally:
+            session.close()
+
+    def get_violations(self, limit: int = 100) -> List[ViolationModel]:
+        """
+        Retrieves recent violations from the database.
+        """
+        session = self.Session()
+        try:
+            # We query the model, order by ID descending (to get most recent), 
+            # and apply the limit.
+            violations = (
+                session.query(ViolationModel)
+                .order_by(ViolationModel.id.desc())
+                .limit(limit)
+                .all()
+            )
+            return violations
+        except Exception as e:
+            logger.error(f"Error retrieving violations: {e}")
+            # Returning an empty list on failure keeps the application flow stable
+            return []
         finally:
             session.close()
