@@ -1,53 +1,96 @@
+"""
+main.py — Production Entry Point
+==================================
+Starts the detection service in production mode:
+  - Loads ROIs from rois.json  (created by run_local.py)
+  - Consumes frames from Kafka [video-frames]
+  - Publishes violations to Kafka [violations]
+  - Saves violation records to Postgres
+
+Run:
+    python main.py
+
+NOTE: Run run_local.py FIRST to draw and save your ROIs.
+      This script will refuse to start without a valid rois.json.
+"""
+
 import logging
+import signal
+import sys
 
-import cv2
-
-from core.interfaces import IDetector, ITracker, IMessageBroker, IViolationRepository
+from core.logging_config import setup_logger
+from helpers.config import get_settings
+from infrastructure.detector import YOLO11Detector
+from infrastructure.byteTrack_tracker import ByteTrackTracker
+from infrastructure.kafka_consumer import KafkaFrameConsumer
+from infrastructure.kafka_streamer import KafkaViolationPublisher
+from infrastructure.postgress_repo import PostgresRepository
+from infrastructure.roi_manager import RoiManager
 from domain.engine import ScooperViolationEngine
-from typing import List, Dict, Any
-import numpy as np
+from detection_manager import DetectionManager
+from infrastructure.visualization import Visualizer
 
+setup_logger()
 logger = logging.getLogger(__name__)
 
 
-class DetectionManager:
-    def __init__(
-        self, 
-        detector: IDetector, 
-        tracker: ITracker,
-        broker: IMessageBroker, 
-        repo: IViolationRepository,
-        engine: ScooperViolationEngine
-    ):
-        self.detector = detector
-        self.tracker = tracker
-        self.broker = broker
-        self.repo = repo
-        self.engine = engine
+def main() -> None:
+    settings = get_settings()
+    logger.info("Settings loaded: %s", settings.model_dump())
 
-    def on_frame_received(self, frame: np.ndarray):
+    # ── Load ROIs ─────────────────────────────────────────────────────────────
+    roi_manager = RoiManager()
+    loaded = roi_manager.load_rois_from_file(settings.roi_config_path)
+    if not loaded or len(roi_manager.rois) == 0:
+        logger.error(
+            "No ROIs found at '%s'. "
+            "Run  python run_local.py  first to draw and save your ROIs.",
+            settings.roi_config_path,
+        )
+        sys.exit(1)
 
-        # 1. Detect objects (Hand, Person, Pizza, Scooper) 
-        raw_detections = self.detector.detect(frame)
+    logger.info("Loaded %d ROI(s) from %s", len(roi_manager.rois), settings.roi_config_path)
 
-        # 2. Temporal Association (DeepSORT)
-        # Adds 'track_id' to each detection to distinguish between workers 
-        tracked_detections = self.tracker.update(raw_detections, frame) 
-        
-        # 3. Violation Logic Engine
-        # Pass the whole list so the engine can check Hand vs. Scooper vs. Pizza
-        violations = self.engine.process_frame(tracked_detections)
-        
-        # 4. Reporting
-        for v in violations:
-            logger.info(f"Violation detected: {v}")
-            self.repo.save_violation(v)  
-            cv2.imwrite(v.frame_path, frame)  # Save frame for reference 
-            # self.broker.publish("alerts", v)
-        
-        # self.broker.publish("streaming_service", {"violations": violations})
-        
-        return tracked_detections, violations 
+    # ── Build components ──────────────────────────────────────────────────────
+    detector  = YOLO11Detector(settings.model_path)
+    tracker   = ByteTrackTracker(track_thresh=0.1, track_buffer=60, match_thresh=0.9)
+    engine    = ScooperViolationEngine(roi_manager=roi_manager)
+    repo      = PostgresRepository(settings.conn_str)
 
-    def start(self):
-        self.broker.subscribe(self.on_frame_received)
+    broker    = KafkaFrameConsumer(
+        bootstrap_servers=settings.kafka_bootstrap_servers,
+        topic=settings.kafka_frames_topic,
+        group_id=settings.kafka_group_id,
+    )
+    publisher = KafkaViolationPublisher(
+        bootstrap_servers=settings.kafka_bootstrap_servers,
+        topic=settings.kafka_violations_topic,
+    )
+
+    visualizer = Visualizer()
+
+    manager = DetectionManager(
+        detector=detector,
+        tracker=tracker,
+        broker=broker,
+        repo=repo,
+        engine=engine,
+        violation_publisher=publisher,
+        roi_manager=roi_manager,
+        visualizer=visualizer,
+    )
+
+    # ── Handle Ctrl+C gracefully ──────────────────────────────────────────────
+    def _shutdown(signum, _frame):
+        logger.info("Signal %d received — shutting down…", signum)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT,  _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    # ── Blocking loop ─────────────────────────────────────────────────────────
+    manager.start()
+
+
+if __name__ == "__main__":
+    main()
