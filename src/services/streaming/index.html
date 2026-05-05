@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <h1>Live Stream Debugger</h1>
+    <img id="stream-frame" src="" style="width: 800px; border: 2px solid black;">
+    <div id="metadata"></div>
+
+    <script>
+        const ws = new WebSocket("ws://localhost:8000/ws/stream");
+        const img = document.getElementById("stream-frame");
+        const meta = document.getElementById("metadata");
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === "frame") {
+                // Update the image src with the base64 string
+                img.src = "data:image/jpeg;base64," + data.frame;
+                
+                // Debug metadata
+                meta.innerHTML = `Frame ID: ${data.frame_id} | Violations: ${data.violation_count}`;
+            }
+        };
+    </script>
+</body>
+</html>
