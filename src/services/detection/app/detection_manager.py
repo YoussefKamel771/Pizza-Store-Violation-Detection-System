@@ -81,7 +81,7 @@ class DetectionManager:
         if violation is not None:
             self._violation_count += 1
             logger.info(
-                "Violation #%d detected → frame_id=%d  track_id=%s  roi=%s",
+                "Violation #%d detected | frame_id=%d  track_id=%s  roi=%s",
                 self._violation_count, frame_id, violation.track_id, violation.roi_name,
             )
             # Save violation frame to disk
