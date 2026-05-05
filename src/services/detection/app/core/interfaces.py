@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from typing import AsyncIterator, Iterator, List, Dict, Any
-
-from models.db_schemas.violation import ViolationModel
+from typing import Iterator, List, Dict, Any
 
 class IDetector(ABC):
     """Interface for object detection models (e.g., YOLO 12)"""
@@ -29,6 +27,11 @@ class IViolationRepository(ABC):
     def get_violations(self, limit: int = 100) -> List[Any]:
         """Retrieve recent violations from the database."""
 
+
+
+
+# ── Frame Consumer (reads frames FROM broker) ─────────────────────────────────
+ 
 class BrokerMessage:
     """
     Thin wrapper so the domain never knows about aio_pika IncomingMessage
@@ -43,11 +46,7 @@ class BrokerMessage:
 
     def acknowledge(self) -> None:
         self._ack_fn()
-
-
-# ── Frame Consumer (reads frames FROM broker) ─────────────────────────────────
- 
-class IFrameConsumer(ABC):
+class IConsumerPort(ABC):
     """
     Synchronous context-manager-compatible frame consumer.
  
@@ -74,7 +73,7 @@ class IFrameConsumer(ABC):
         Implementations must NOT auto-ack; the caller acks after processing.
         """
  
-    def __enter__(self) -> "IFrameConsumer":
+    def __enter__(self) -> "IConsumerPort":
         self.connect()
         return self
  
@@ -84,13 +83,18 @@ class IFrameConsumer(ABC):
 
 # ── Violation Publisher (writes violations TO broker) ─────────────────────────
  
-class IViolationPublisher(ABC):
+class IDetectionResultPublisher(ABC):
     """
-    Synchronous violation publisher.
+    Publishes every processed frame — detections + optional violation —
+    to the detection-results Kafka topic.
+ 
+    This is the single outbound topic. The streaming service
+    reads it for both the live video feed and the violation counter.
  
     Usage:
         with publisher:
-            publisher.publish(violation, frame_id=frame_id)
+            publisher.publish(frame, frame_id, timestamp,
+                              detections, violation, violation_count)
     """
  
     @abstractmethod
@@ -102,10 +106,20 @@ class IViolationPublisher(ABC):
         """Flush pending messages and close the connection."""
  
     @abstractmethod
-    def publish(self, violation: Any) -> None:
-        """Serialize and send a single violation event to the broker."""
+    def publish(
+        self,
+        frame_id: int,
+        timestamp: float,
+        detections: list, # list of tracked detection dicts
+        violation,        # domain Violation object or None
+        violation_count: int,
+    ) -> None:
+        """
+        Serialize and send one detection-result message.
+        violation=None means no violation occurred this frame.
+        """
  
-    def __enter__(self) -> "IViolationPublisher":
+    def __enter__(self) -> "IDetectionResultPublisher":
         self.connect()
         return self
  

@@ -7,12 +7,12 @@ import cv2
 import numpy as np
 from confluent_kafka import Consumer, KafkaError, KafkaException
 
-from core.interfaces import IFrameConsumer, BrokerMessage
+from core.interfaces import IConsumerPort, BrokerMessage
 
 logger = logging.getLogger(__name__)
 
 
-class KafkaFrameConsumer(IFrameConsumer):
+class KafkaFrameConsumer(IConsumerPort):
     """
     Reads frames from the 'video-frames' Kafka topic.
 
@@ -39,7 +39,7 @@ class KafkaFrameConsumer(IFrameConsumer):
         self._poll_timeout      = poll_timeout_s
         self._consumer: Consumer | None = None
 
-    # ── IFrameConsumer ────────────────────────────────────────────────────────
+    # ── IConsumerPort ────────────────────────────────────────────────────────
 
     def connect(self) -> None:
         logger.info(

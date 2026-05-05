@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     # ── Kafka ─────────────────────────────────────────────────────────────────
     kafka_bootstrap_servers: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092")
     kafka_frames_topic: str      = os.getenv("KAFKA_FRAMES_TOPIC",      "video-frames")
-    kafka_violations_topic: str  = os.getenv("KAFKA_VIOLATIONS_TOPIC",  "violations")
+    kafka_detection_results_topic: str = os.getenv(
+        "KAFKA_DETECTION_RESULTS_TOPIC", "detection-results"
+    )
     kafka_group_id: str          = os.getenv("KAFKA_GROUP_ID",          "detection-service")
 
     # ── Database ──────────────────────────────────────────────────────────────

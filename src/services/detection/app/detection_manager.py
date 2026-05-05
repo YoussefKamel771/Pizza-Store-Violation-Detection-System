@@ -11,10 +11,10 @@ import cv2
 import numpy as np
 
 from core.interfaces import (
+    IDetectionResultPublisher,
     IDetector,
     ITracker,
-    IFrameConsumer,
-    IViolationPublisher,
+    IConsumerPort,
     IViolationRepository,
 )
 from domain.engine import ScooperViolationEngine
@@ -29,10 +29,10 @@ class DetectionManager:
         self,
         detector:            IDetector,
         tracker:             ITracker,
-        broker:              IFrameConsumer | None,   # None when running locally
+        broker:              IConsumerPort | None,   # None when running locally
         repo:                IViolationRepository,
         engine:              ScooperViolationEngine,
-        violation_publisher: IViolationPublisher | None = None,  # None in local mode
+        result_publisher:   IDetectionResultPublisher | None = None,  # None in local mode
         roi_manager:         RoiManager | None = None,         # Optional for visualization
         visualizer:          Visualizer | None = None,        # Optional for visualization
     ):
@@ -41,13 +41,20 @@ class DetectionManager:
         self.broker              = broker
         self.repo                = repo
         self.engine              = engine
-        self.violation_publisher = violation_publisher
+        self.result_publisher = result_publisher
         self.roi_manager         =  roi_manager 
         self.visualizer          =  visualizer
 
+        self._violation_count = 0
+
     # ── Core per-frame logic ──────────────────────────────────────────────────
 
-    def on_frame_received(self, payload: dict):
+    def on_frame_received(
+        self,
+        frame: np.ndarray,
+        frame_id: int = -1,
+        timestamp: float | None = None,
+    ):
         """
         Run the full detection pipeline on a single BGR frame.
         Returns (tracked_detections, violations, annotated_frame).
@@ -56,43 +63,51 @@ class DetectionManager:
         Called inside start() for every Kafka message in production.
         """
         # 1. Detect objects: Hand, Person, Pizza, Scooper
-        frame = payload["frame"]     # BGR numpy array
         raw_detections = self.detector.detect(frame)
 
         # 2. Temporal association — assigns stable track_id per worker
         tracked_detections = self.tracker.update(raw_detections)
 
         # logger.info("Received payload keys: %s", payload.keys())
-        # 3. Violation logic engine
-        violations = self.engine.process_frame(tracked_detections, 
-                                               payload["frame_id"], 
-                                               payload["timestamp"], 
-                                               payload.get("source", "unknown"),)
+        # 3. Violation logic
+        violations = self.engine.process_frame(tracked_detections, frame_id, timestamp)
 
-        # 4. Persist + publish each violation
-        for v in violations:
+        # logger.info("violations = %s", violations)
+        
+        violation = violations[0] if violations else None
+
+        # logger.info("violation = %s", violation)
+
+        if violation is not None:
+            self._violation_count += 1
             logger.info(
-                "Violation detected → frame_id=%d  track_id=%s",
-                payload["frame_id"], v.track_id,
+                "Violation #%d detected → frame_id=%d  track_id=%s  roi=%s",
+                self._violation_count, frame_id, violation.track_id, violation.roi_name,
             )
+            # Save violation frame to disk
+            cv2.imwrite(violation.frame_path, frame)
+            # Persist to Postgres
+            self.repo.save_violation(violation)
 
-            # Save the violation frame image to disk
-            cv2.imwrite(v.frame_path, frame)
+        # 5. Publish to detection-results (every frame, not just violations)
+        if self.result_publisher is not None:
+            self.result_publisher.publish(
+            # frame=frame,
+            frame_id=frame_id,
+            timestamp=timestamp,
+            detections=tracked_detections,
+            violation=violation,
+            violation_count=self._violation_count,
+        )
 
-            # Persist metadata to Postgres
-            if self.repo is not None:
-                self.repo.save_violation(v)
-
-            # Publish to Kafka violations topic (skip in local mode)
-            if self.violation_publisher is not None:
-                self.violation_publisher.publish(v)
 
         if self.visualizer is not None:
             annotated_frame = self.visualizer.draw_frame(
                 frame.copy(), tracked_detections, self.roi_manager, violations
             )
+            return tracked_detections, violations, annotated_frame
 
-        return tracked_detections, violations, annotated_frame
+        return tracked_detections, violations, None
 
     # ── Production broker loop ────────────────────────────────────────────────
 
@@ -111,14 +126,17 @@ class DetectionManager:
         logger.info("DetectionManager starting — connecting to Kafka frame topic…")
 
         with self.broker:                       # connect() on enter, disconnect() on exit
-            with self.violation_publisher:      # connect() / disconnect()
+            with self.result_publisher:      # connect() / disconnect()
                 for msg in self.broker.subscribe():
                     try:
-                        payload  = msg.payload
+                        payload   = msg.payload
+                        frame     = payload["frame"]        # BGR numpy array
+                        frame_id  = payload["frame_id"]
+                        timestamp = payload["timestamp"]
+ 
+                        logger.debug("Processing frame_id=%d", frame_id)
 
-                        logger.debug("Processing frame_id=%d", payload["frame_id"])
-
-                        _, violations, display = self.on_frame_received(payload)
+                        _, violations, display =  self.on_frame_received(frame, frame_id=frame_id, timestamp=timestamp)
 
                         # Overlay running violation count
                         if self.visualizer is not None and display is not None:

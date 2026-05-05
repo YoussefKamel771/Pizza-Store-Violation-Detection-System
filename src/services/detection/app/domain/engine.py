@@ -67,7 +67,7 @@ class ScooperViolationEngine:
         self.worker_states[worker_id] = state
         return "CLEAR"
 
-    def process_frame(self, tracked_objects: list, frame_id: int, timestamp: float, video_source: str, rois: List[ROI] = None) -> list:
+    def process_frame(self, tracked_objects: list, frame_id: int, timestamp: float, video_source: str="unknown", rois: List[ROI] = None) -> tuple:
         """
         Process full frame and return all violations.
         Optional rois override for per-frame dynamic ROI updates.
@@ -78,6 +78,7 @@ class ScooperViolationEngine:
             self.rois = rois
             
         violations = []
+        
         
         for obj in tracked_objects:
             if obj['label'] == 'hand':
@@ -98,3 +99,4 @@ class ScooperViolationEngine:
         # Restore original ROIs
         self.rois = original_rois
         return violations
+
