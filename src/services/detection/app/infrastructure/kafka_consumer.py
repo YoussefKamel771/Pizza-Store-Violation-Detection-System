@@ -43,7 +43,7 @@ class KafkaFrameConsumer(IConsumerPort):
 
     def connect(self) -> None:
         logger.info(
-            "Connecting Kafka consumer → servers=%s  topic=%s  group=%s",
+            "Connecting Kafka consumer | servers=%s  topic=%s  group=%s",
             self._bootstrap_servers, self._topic, self._group_id,
         )
         self._consumer = Consumer(

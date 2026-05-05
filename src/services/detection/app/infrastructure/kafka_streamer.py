@@ -27,7 +27,7 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
 
     def connect(self) -> None:
         logger.info(
-            "Connecting Kafka detection publisher → servers=%s  topic=%s",
+            "Connecting Kafka detection publisher | servers=%s  topic=%s",
             self._bootstrap_servers, self._topic,
         )
         self._producer = Producer(
@@ -90,7 +90,7 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
             )
             if violation is not None:
                 # logger.info(
-                #     "Published violation → frame_id=%d  track_id=%d  roi=%s",
+                #     "Published violation | frame_id=%d  track_id=%d  roi=%s",
                 #     violation.frame_id, violation.track_id, violation.roi_name,
                 # )
                 logger.info("published violations = %s", violation)
@@ -111,7 +111,7 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
             logger.error("Violation delivery failed: %s", err)
         else:
             logger.debug(
-                "Violation delivered → topic=%s  partition=%d  offset=%d",
+                "Violation delivered | topic=%s  partition=%d  offset=%d",
                 msg.topic(), msg.partition(), msg.offset(),
             )
 
@@ -151,5 +151,6 @@ def _serialize_violation(violation) -> Optional[dict]:
     return {
         "violation_id": str(violation.id),
         "track_id":     int(violation.track_id),
+        "frame_id":     int(violation.frame_id),
         "roi_id":       str(violation.roi_name),
     }
