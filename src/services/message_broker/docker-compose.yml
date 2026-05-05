@@ -36,6 +36,21 @@ services:
       KAFKA_NUM_PARTITIONS: 1
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
 
+      # 1. Time-based retention (e.g., 1 hour)
+      KAFKA_LOG_RETENTION_HOURS: 1
+      
+      # 2. Size-based retention (e.g., 2GB total per partition)
+      # 2147483648 bytes = 2GB
+      KAFKA_LOG_RETENTION_BYTES: 2147483648
+      
+      # 3. Segment size (e.g., 100MB)
+      # Kafka deletes data when a "segment" file is finished. 
+      # Smaller segments = more frequent and accurate cleanup.
+      KAFKA_LOG_SEGMENT_BYTES: 104857600
+      
+      # 4. How often Kafka checks for things to delete (e.g., every 5 minutes)
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+
     healthcheck:
       test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
       interval: 10s
