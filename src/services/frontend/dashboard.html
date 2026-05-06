@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVDS · Scooper Violation Detection System</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body, #root { height: 100%; overflow: hidden; }
+  body { background: #060810; font-family: 'IBM Plex Mono', 'Courier New', monospace; }
+
+  @keyframes pulse        { 0%,100%{opacity:1} 50%{opacity:0.25} }
+  @keyframes recBlink     { 0%,100%{opacity:1} 50%{opacity:0} }
+  @keyframes flashRed     { 0%{opacity:1} 100%{opacity:0} }
+  @keyframes slideInRight { from{transform:translateX(24px);opacity:0} to{transform:translateX(0);opacity:1} }
+  @keyframes countPop     { 0%{transform:scale(1.4);color:#ff4455} 100%{transform:scale(1);color:#ff1a2e} }
+  @keyframes scanline     { 0%{background-position:0 0} 100%{background-position:0 100%} }
+
+  .scanlines {
+    position: fixed; inset: 0; pointer-events: none; z-index: 60;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px
+    );
+  }
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 59;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.5) 100%);
+  }
+  .pulse  { animation: pulse 2s ease-in-out infinite; }
+  .blink  { animation: recBlink 1s step-end infinite; }
+  .flash  { animation: flashRed 0.7s ease-out forwards; }
+  .slide  { animation: slideInRight 0.35s cubic-bezier(.2,.8,.4,1) forwards; }
+
+  .hud-tl { border-top: 1.5px solid #38bdf8; border-left:  1.5px solid #38bdf8; }
+  .hud-tr { border-top: 1.5px solid #38bdf8; border-right: 1.5px solid #38bdf8; }
+  .hud-bl { border-bottom:1.5px solid #38bdf8; border-left: 1.5px solid #38bdf8; }
+  .hud-br { border-bottom:1.5px solid #38bdf8; border-right:1.5px solid #38bdf8; }
+
+  ::-webkit-scrollbar       { width: 3px; }
+  ::-webkit-scrollbar-track { background: #060810; }
+  ::-webkit-scrollbar-thumb { background: #1a3050; border-radius: 2px; }
+
+  button { font-family: inherit; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ── Helpers ──────────────────────────────────────── */
+const fmt  = d => d.toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+const fmtD = d => d.toLocaleDateString('en-US',  { year:'numeric', month:'short', day:'2-digit' }).toUpperCase();
+const pad3 = n => String(Math.max(0, n)).padStart(3, '0');
+const pad2 = n => String(Math.max(0, n)).padStart(2, '0');
+
+/* ── Inline SVG icon kit ──────────────────────────── */
+const SVG = ({ d, size=14, color='currentColor', strokeWidth=2 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+    stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+    <path d={d} />
+  </svg>
+);
+const IC = {
+  shield:    'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  wifi:      'M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01',
+  wifiOff:   'M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01',
+  alert:     'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
+  camera:    'M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  eye:       'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  activity:  'M22 12h-4l-3 9L9 3l-3 9H2',
+  refresh:   'M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15',
+  check:     'M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4L12 14.01l-3-3',
+  zap:       'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
+  crosshair: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 8v4M12 16h.01M8 12h4M16 12h.01',
+};
+
+/* ── Colours ──────────────────────────────────────── */
+const C = {
+  bg:     '#060810', panel:  '#0a0d16', header: '#0c1020',
+  border: '#141e30', line:   '#0d1525',
+  red:    '#ff1a2e', redDim: '#7f0d18',  redFaint:'#200508',
+  green:  '#00e87b', blue:   '#38bdf8',  amber:  '#fbbf24',
+  text:   '#e2e8f0', muted:  '#475569',  dim:    '#1e3050',
+};
+
+/* ── Data mapper ──────────────────────────────────── */
+const mapInc = v => ({
+  id:       v.violation_id ?? v.id ?? (Math.random() * 1e9 | 0).toString(36),
+  ts:       new Date((v.timestamp ?? Date.now() / 1000) * 1000),
+  zone:     v.roi_id   ?? v.zone     ?? 'Zone A',
+  type:     v.violation_type ?? v.type ?? 'No Scooper Used',
+  severity: v.severity ?? 'HIGH',
+  worker:   v.track_id ?? v.worker_id ?? null,
+  conf:     v.confidence ?? null,
+});
+
+/* ═══════════════════════════════════════════════════
+   MAIN APP
+═══════════════════════════════════════════════════ */
+function App() {
+  const [connected,  setConnected]  = useState(false);
+
+  // ── FIX 1: hasFrame tracks whether we've received at least one frame
+  //    so we can show/hide the no-signal placeholder without storing
+  //    the frame bytes in React state at all.
+  const [hasFrame,   setHasFrame]   = useState(false);
+
+  const [count,      setCount]      = useState(0);
+  const [incidents,  setIncidents]  = useState([]);
+  const [detections, setDetections] = useState([]);
+  const [flash,      setFlash]      = useState(false);
+  const [toast,      setToast]      = useState(null);
+  const [now,        setNow]        = useState(new Date());
+
+  // ── FIX 1: canvas ref — frames are drawn here directly, never stored in state
+  const canvasRef = useRef(null);
+  const wsRef     = useRef(null);
+  const logRef    = useRef(null);
+  const countKey  = useRef(0);
+
+  /* Clock */
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  /* Initial REST fetch */
+  useEffect(() => {
+    fetch('http://localhost:8000/violations/count')
+      .then(r => r.json())
+      .then(d => setCount(d.count ?? 0))
+      .catch(() => {});
+
+    fetch('http://localhost:8000/violations?limit=50')
+      .then(r => r.json())
+      .then(d => {
+        // ── FIX 2: API returns { count, violations: [...] } not a bare array
+        const list = Array.isArray(d) ? d : (d.violations ?? []);
+        if (list.length > 0) setIncidents(list.map(mapInc));
+      })
+      .catch(() => {});
+  }, []);
+
+  /* WebSocket with auto-reconnect */
+  useEffect(() => {
+    let dead = false;
+
+    const connect = () => {
+      if (dead) return;
+      try {
+        const ws = new WebSocket('ws://localhost:8000/ws/stream');
+        wsRef.current = ws;
+
+        ws.onopen  = () => setConnected(true);
+        ws.onclose = () => {
+          setConnected(false);
+          // ── FIX 3: retry without reloading the page
+          if (!dead) setTimeout(connect, 3000);
+        };
+        ws.onerror = () => ws.close(); // let onclose handle retry
+
+        ws.onmessage = ({ data }) => {
+          try {
+            const msg = JSON.parse(data);
+            if (msg.type === 'heartbeat') return;
+            if (msg.type !== 'frame')     return;
+
+            // ── FIX 1: draw frame directly to canvas — zero React re-renders
+            if (msg.frame && canvasRef.current) {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                // Resize canvas to match frame dimensions on first frame
+                if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+                  canvas.width  = img.naturalWidth;
+                  canvas.height = img.naturalHeight;
+                }
+                canvas.getContext('2d').drawImage(img, 0, 0);
+                // Revoke the object URL to free memory
+                URL.revokeObjectURL(img.src);
+              };
+              // Convert base64 → Blob → Object URL (faster than data: URI for large frames)
+              // const bytes  = atob(msg.frame);
+              // const arr    = new Uint8Array(bytes.length);
+              // for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+              // img.src = URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));
+
+              img.src = `data:image/jpeg;base64,${msg.frame}`;
+
+              // Only set hasFrame once — purely to unmount the no-signal placeholder
+              if (!hasFrame) setHasFrame(true);
+            }
+
+            // ── Update violation count (only triggers re-render when count changes)
+            if (msg.violation_count != null && msg.violation_count !== count) {
+              countKey.current++;
+              setCount(msg.violation_count);
+            }
+
+            // ── Update detection list (only when detections actually changed)
+            if (Array.isArray(msg.detections)) {
+              setDetections(msg.detections);
+            }
+
+            // ── Handle new violation
+            if (msg.violation) {
+              const inc = mapInc(msg.violation);
+              setIncidents(prev => [inc, ...prev].slice(0, 200));
+              setFlash(true);
+              setToast(inc);
+              if (logRef.current) logRef.current.scrollTop = 0;
+              setTimeout(() => setFlash(false),  900);
+              setTimeout(() => setToast(null), 4500);
+            }
+          } catch { /* malformed JSON — ignore */ }
+        };
+      } catch { setTimeout(connect, 3000); }
+    };
+
+    connect();
+    return () => { dead = true; wsRef.current?.close(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // ← empty deps — connect() runs once, closure captures refs not state
+
+  /* Refresh log button */
+  const refreshLog = useCallback(() => {
+    fetch('http://localhost:8000/violations?limit=100')
+      .then(r => r.json())
+      // ── FIX 2: same fix applied here
+      .then(d => {
+        const list = Array.isArray(d) ? d : (d.violations ?? []);
+        setIncidents(list.map(mapInc));
+      })
+      .catch(() => {});
+  }, []);
+
+  /* Severity colour helper */
+  const sevColor = s => s === 'CRITICAL' ? C.red : s === 'HIGH' ? '#ff6b35' : C.amber;
+
+  /* ──────────────────── RENDER ──────────────────── */
+  return (
+    <div style={{ height:'100vh', background:C.bg, color:C.text, display:'flex', flexDirection:'column', overflow:'hidden', position:'relative' }}>
+
+      {/* Overlays */}
+      <div className="scanlines" />
+      <div className="vignette"  />
+
+      {/* Screen-edge violation flash */}
+      {flash && (
+        <div className="flash" style={{ position:'fixed', inset:0, border:'4px solid '+C.red,
+          boxShadow:'inset 0 0 100px rgba(255,26,46,0.2)', pointerEvents:'none', zIndex:97 }} />
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="slide" style={{
+          position:'fixed', top:66, right:20, zIndex:200, width:310,
+          background:'#100207', border:'1px solid '+C.red, borderLeft:'4px solid '+C.red,
+          borderRadius:4, padding:'12px 16px',
+        }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+            <SVG d={IC.alert} size={13} color={C.red} />
+            <span style={{ color:C.red, fontSize:9, fontWeight:700, letterSpacing:'0.18em' }}>⚠ VIOLATION DETECTED</span>
+          </div>
+          <div style={{ fontSize:12, color:'#fca5a5', marginBottom:3, fontWeight:600 }}>{toast.type}</div>
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize:9 }}>
+            <span style={{ color:'#7f2030' }}>{toast.zone}</span>
+            <span style={{ color:'#7f2030', fontVariantNumeric:'tabular-nums' }}>{fmt(toast.ts)}</span>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════ HEADER ══════════ */}
+      <header style={{
+        height:52, flexShrink:0, background:C.header, borderBottom:'1px solid '+C.border,
+        display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 20px',
+      }}>
+        <div style={{ display:'flex', alignItems:'center', gap:13 }}>
+          <div style={{ width:36, height:36, background:'#0d1e40', border:'1px solid #1e408a', borderRadius:4,
+            display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <SVG d={IC.shield} size={18} color="#4d9fff" />
+          </div>
+          <div>
+            <div style={{ fontSize:14, fontWeight:700, color:'#f0f6ff', letterSpacing:'0.05em',
+              fontFamily:"'Rajdhani', sans-serif" }}>
+              SCOOPER VIOLATION DETECTION SYSTEM
+            </div>
+            <div style={{ fontSize:8, color:'#263858', letterSpacing:'0.22em', marginTop:1 }}>
+              SANAD HYGIENE COMPLIANCE · PROTEIN STATION · REV 2.4.1
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display:'flex', alignItems:'center', gap:22 }}>
+          <div style={{ fontSize:10, color:'#2a3f60', letterSpacing:'0.06em', fontVariantNumeric:'tabular-nums' }}>
+            {fmtD(now)} · {fmt(now)}
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:7, padding:'5px 12px',
+            background: connected ? 'rgba(0,232,123,0.06)' : 'rgba(255,26,46,0.06)',
+            border:`1px solid ${connected ? 'rgba(0,232,123,0.3)' : 'rgba(255,26,46,0.3)'}`,
+            borderRadius:3 }}>
+            <div className={connected ? 'pulse' : ''}
+              style={{ width:7, height:7, borderRadius:'50%',
+                background: connected ? C.green : C.red,
+                boxShadow: `0 0 7px ${connected ? C.green : C.red}` }} />
+            <SVG d={connected ? IC.wifi : IC.wifiOff} size={12} color={connected ? C.green : C.red} />
+            <span style={{ fontSize:9, fontWeight:700, letterSpacing:'0.22em',
+              color: connected ? C.green : C.red }}>
+              {connected ? 'LIVE' : 'OFFLINE'}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* ══════════ BODY ══════════ */}
+      <div style={{ flex:1, display:'grid', gridTemplateColumns:'238px 1fr 292px', overflow:'hidden' }}>
+
+        {/* ── LEFT SIDEBAR ── */}
+        <aside style={{ background:C.panel, borderRight:'1px solid '+C.border,
+          display:'flex', flexDirection:'column', overflowY:'auto' }}>
+
+          <div style={{ margin:12, background:C.redFaint, border:'1px solid #4a0e15', borderRadius:4, padding:'18px 14px', textAlign:'center' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:7, marginBottom:12 }}>
+              <div style={{ width:6, height:6, borderRadius:'50%', background:C.red,
+                boxShadow:'0 0 8px '+C.red, animation: incidents.length > 0 ? 'pulse 1.5s infinite':'none' }} />
+              <span style={{ fontSize:8, letterSpacing:'0.28em', color:'#dc2626' }}>TOTAL VIOLATIONS</span>
+            </div>
+            <div key={countKey.current} style={{
+              fontSize:64, fontWeight:700, color:C.red, lineHeight:1,
+              fontVariantNumeric:'tabular-nums', textShadow:'0 0 30px rgba(255,26,46,0.4)',
+              animation: countKey.current > 0 ? 'countPop 0.4s ease-out' : 'none',
+            }}>
+              {pad3(count)}
+            </div>
+            <div style={{ marginTop:10, fontSize:8, color:C.redDim, letterSpacing:'0.18em' }}>SESSION TOTAL</div>
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:1, margin:'0 12px 12px',
+            background:C.border, borderRadius:4, overflow:'hidden' }}>
+            {[
+              { label:'ZONES',    val:'04',  color:C.blue },
+              { label:'CAMERAS',  val:'01',  color:C.blue },
+              { label:'CRITICAL', val:pad2(incidents.filter(i=>i.severity==='CRITICAL').length), color:C.red },
+              { label:'TOTAL INC',val:incidents.length>99?'99+':pad2(incidents.length),         color:C.amber },
+            ].map((s,i) => (
+              <div key={i} style={{ background:C.panel, padding:'10px 8px', textAlign:'center' }}>
+                <div style={{ fontSize:8, color:C.muted, letterSpacing:'0.15em', marginBottom:5 }}>{s.label}</div>
+                <div style={{ fontSize:24, fontWeight:700, color:s.color, fontVariantNumeric:'tabular-nums' }}>{s.val}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ margin:'0 12px 12px', background:'#080c15', border:'1px solid '+C.border,
+            borderRadius:4, padding:12, flex:1, minHeight:130 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:11 }}>
+              <SVG d={IC.eye} size={11} color={C.blue} />
+              <span style={{ fontSize:8, letterSpacing:'0.25em', color:C.blue }}>LIVE DETECTIONS</span>
+              {connected && <div className="blink" style={{ width:5, height:5, borderRadius:'50%', background:C.red, marginLeft:'auto' }} />}
+            </div>
+            {detections.length === 0 ? (
+              <div style={{ textAlign:'center', padding:'18px 0', color:C.dim, fontSize:9, letterSpacing:'0.15em' }}>
+                — SCANNING —
+              </div>
+            ) : detections.map((det,i) => (
+              <div key={i} style={{
+                display:'flex', alignItems:'center', justifyContent:'space-between',
+                padding:'5px 8px', marginBottom:5, background:C.bg, borderRadius:3,
+                borderLeft:`2px solid ${det.in_roi ? '#ff6b35' : C.green}`,
+              }}>
+                <div>
+                  <div style={{ fontSize:10, color:'#94a3b8', fontWeight:500 }}>{det.label}</div>
+                  {det.confidence != null &&
+                    <div style={{ fontSize:8, color:C.muted }}>{(det.confidence*100).toFixed(0)}% conf</div>
+                  }
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                  <div style={{ width:4, height:4, borderRadius:'50%',
+                    background: det.in_roi ? '#ff6b35' : C.green }} />
+                  <span style={{ fontSize:8, color: det.in_roi ? '#ff6b35':C.green, letterSpacing:'0.08em' }}>
+                    {det.in_roi ? 'IN ROI' : 'CLEAR'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ margin:'0 12px 12px', background:'#080c15', border:'1px solid '+C.border, borderRadius:4, padding:12 }}>
+            <div style={{ fontSize:8, letterSpacing:'0.22em', color:C.dim, marginBottom:10 }}>SUBSYSTEM STATUS</div>
+            {[
+              { label:'YOLO v12 Engine', ok:true },
+              { label:'ROI Tracker',     ok:true },
+              { label:'Violation FSM',   ok:true },
+              { label:'WebSocket Feed',  ok:connected },
+              { label:'FastAPI Server',  ok:connected },
+            ].map((s,i,arr) => (
+              <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+                padding:'4px 0', borderBottom: i<arr.length-1 ? '1px solid '+C.line : 'none' }}>
+                <span style={{ fontSize:9, color:C.muted }}>{s.label}</span>
+                <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                  <div style={{ width:5, height:5, borderRadius:'50%', background: s.ok ? C.green : C.red }} />
+                  <span style={{ fontSize:8, color: s.ok ? C.green : C.red, letterSpacing:'0.12em' }}>
+                    {s.ok ? 'OK' : 'ERR'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
+
+        {/* ── CENTER: VIDEO FEED ── */}
+        <main style={{ background:'#050709', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+          <div style={{ flexShrink:0, height:36, background:C.header, borderBottom:'1px solid '+C.border,
+            display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:9 }}>
+              <SVG d={IC.camera} size={12} color={C.blue} />
+              <span style={{ fontSize:9, letterSpacing:'0.2em', color:C.blue }}>
+                CAM-01 · PROTEIN STATION · ROI ACTIVE
+              </span>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+              {connected && (
+                <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                  <div className="blink" style={{ width:6, height:6, borderRadius:'50%', background:C.red }} />
+                  <span style={{ fontSize:8, color:C.red, letterSpacing:'0.2em' }}>● REC</span>
+                </div>
+              )}
+              <span style={{ fontSize:8, color:C.dim, letterSpacing:'0.12em' }}>1692×1024 · 15FPS · JPEG</span>
+            </div>
+          </div>
+
+          <div style={{ flex:1, position:'relative', display:'flex', alignItems:'center',
+            justifyContent:'center', background:'#030407', overflow:'hidden' }}>
+
+            {/* ── FIX 1: canvas is ALWAYS in the DOM, just hidden before first frame.
+                Keeping it mounted means the ref is always valid when onmessage fires. */}
+            <canvas
+              ref={canvasRef}
+              style={{
+                maxWidth:'100%', maxHeight:'100%', objectFit:'contain', display:'block',
+                visibility: hasFrame ? 'visible' : 'hidden',
+                position: hasFrame ? 'relative' : 'absolute',
+              }}
+            />
+
+            {/* HUD corners — only show when streaming */}
+            {hasFrame && ['tl','tr','bl','br'].map(c => (
+              <div key={c} className={`hud-${c}`}
+                style={{ position:'absolute', width:24, height:24,
+                  top:    c[0]==='t' ? 14 : undefined,
+                  bottom: c[0]==='b' ? 14 : undefined,
+                  left:   c[1]==='l' ? 14 : undefined,
+                  right:  c[1]==='r' ? 14 : undefined,
+                }} />
+            ))}
+
+            {/* Watermark */}
+            {hasFrame && (
+              <>
+                <div style={{ position:'absolute', bottom:9, left:20 }}>
+                  <span style={{ fontSize:8, color:'rgba(56,189,248,0.35)', letterSpacing:'0.14em', fontVariantNumeric:'tabular-nums' }}>
+                    {fmtD(now)} {fmt(now)}
+                  </span>
+                </div>
+                <div style={{ position:'absolute', bottom:9, right:20 }}>
+                  <span style={{ fontSize:8, color:'rgba(56,189,248,0.25)', letterSpacing:'0.18em' }}>SANAD-CVS</span>
+                </div>
+              </>
+            )}
+
+            {/* No-signal placeholder */}
+            {!hasFrame && (
+              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16 }}>
+                <div style={{
+                  width:80, height:80, border:'1.5px solid #131e30', borderRadius:8,
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                  background:'repeating-linear-gradient(45deg,#030407,#030407 7px,#060810 7px,#060810 14px)',
+                }}>
+                  <SVG d={IC.camera} size={32} color="#131e30" />
+                </div>
+                <div style={{ textAlign:'center' }}>
+                  <div style={{ fontSize:11, letterSpacing:'0.28em', color:C.dim, marginBottom:6 }}>
+                    {connected ? 'AWAITING STREAM' : 'NO SIGNAL'}
+                  </div>
+                  <div style={{ fontSize:8, color:'#0d1a2e', letterSpacing:'0.16em' }}>
+                    {connected ? 'ws://localhost:8000/ws/stream' : 'CONNECTION OFFLINE'}
+                  </div>
+                  {!connected && (
+                    <div style={{ marginTop:10, fontSize:8, color:'#0d1a2e', letterSpacing:'0.12em' }}>
+                      RECONNECTING IN 3s...
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </main>
+
+        {/* ── RIGHT SIDEBAR: INCIDENT LOG ── */}
+        <aside style={{ background:C.panel, borderLeft:'1px solid '+C.border,
+          display:'flex', flexDirection:'column', overflow:'hidden' }}>
+
+          <div style={{ flexShrink:0, padding:'10px 14px', borderBottom:'1px solid '+C.border,
+            background:C.header, display:'flex', alignItems:'center', gap:8 }}>
+            <SVG d={IC.activity} size={12} color='#dc2626' />
+            <span style={{ fontSize:8, letterSpacing:'0.26em', color:'#dc2626' }}>INCIDENT LOG</span>
+            <div style={{ marginLeft:'auto', background:'#300a0d', color:'#fca5a5',
+              fontSize:9, fontWeight:700, padding:'1px 8px', borderRadius:2,
+              fontVariantNumeric:'tabular-nums', border:'1px solid #5c1a1a' }}>
+              {incidents.length}
+            </div>
+          </div>
+
+          <div ref={logRef} style={{ flex:1, overflowY:'auto', padding:'4px 0' }}>
+            {incidents.length === 0 ? (
+              <div style={{ textAlign:'center', padding:'48px 20px', color:C.dim }}>
+                <SVG d={IC.check} size={30} color={C.dim} />
+                <div style={{ fontSize:9, letterSpacing:'0.18em', marginTop:12 }}>NO INCIDENTS</div>
+                <div style={{ fontSize:8, color:'#0d1a2e', marginTop:5, letterSpacing:'0.14em' }}>FULL COMPLIANCE</div>
+              </div>
+            ) : incidents.map((inc, i) => (
+              <div key={inc.id} style={{
+                padding:'10px 14px', borderBottom:'1px solid '+C.line,
+                borderLeft:`3px solid ${i === 0 ? C.red : inc.severity === 'CRITICAL' ? '#dc2626' : C.redDim}`,
+                background: i === 0 ? 'rgba(255,26,46,0.04)' : 'transparent',
+              }}>
+                <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:6, marginBottom:5 }}>
+                  <span style={{ fontSize:11, color: i===0 ? '#fca5a5':'#ef4444', fontWeight:600, lineHeight:1.3, flex:1 }}>
+                    {inc.type}
+                  </span>
+                  <span style={{
+                    flexShrink:0, fontSize:7, background:'#180509', border:`1px solid ${sevColor(inc.severity)}40`,
+                    color:sevColor(inc.severity), padding:'2px 5px', borderRadius:2,
+                    letterSpacing:'0.1em', whiteSpace:'nowrap',
+                  }}>{inc.severity}</span>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:6 }}>
+                  <span style={{ fontSize:9, color:C.muted }}>{inc.zone}</span>
+                  <span style={{ fontSize:8, color:'#2a3f60', fontVariantNumeric:'tabular-nums' }}>{fmt(inc.ts)}</span>
+                </div>
+                {(inc.worker || inc.conf != null) && (
+                  <div style={{ display:'flex', gap:10, marginTop:3, fontSize:8, color:'#263858' }}>
+                    {inc.worker != null && <span>Worker #{inc.worker}</span>}
+                    {inc.conf   != null && <span>Conf: {(inc.conf*100).toFixed(0)}%</span>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ flexShrink:0, padding:12, borderTop:'1px solid '+C.border, background:C.header }}>
+            <button onClick={refreshLog} style={{
+              width:'100%', background:'transparent', border:'1px solid '+C.dim, borderRadius:3,
+              padding:'7px 12px', display:'flex', alignItems:'center', justifyContent:'center',
+              gap:7, color:C.muted, fontSize:8, letterSpacing:'0.2em',
+              transition:'border-color 0.2s, color 0.2s',
+            }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor=C.blue; e.currentTarget.style.color=C.blue; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor=C.dim;  e.currentTarget.style.color=C.muted; }}
+            >
+              <SVG d={IC.refresh} size={10} color="currentColor" />
+              REFRESH LOG
+            </button>
+          </div>
+        </aside>
+      </div>
+
+      <style>{`
+        @keyframes countPop {
+          0%   { transform:scale(1.35); filter:brightness(1.5); }
+          100% { transform:scale(1);    filter:brightness(1);   }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
