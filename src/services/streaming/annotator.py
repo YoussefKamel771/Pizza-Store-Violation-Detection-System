@@ -27,6 +27,7 @@ _VIOLATION_COLOUR  = (  0,   0, 255)   # red
 _ROI_COLOUR        = (  0, 255, 255)   # yellow
 _IN_ROI_COLOUR     = (  0,   0, 255)   # red when hand is in ROI
 
+COLOURS = np.random.randint(0, 255, size=(100, 3), dtype=np.uint8)
 
 def annotate(
     jpeg_bytes: bytes,
@@ -70,8 +71,11 @@ def annotate(
         confidence = det.get("confidence", 0.0)
         track_id   = det.get("track_id", -1)
         in_roi     = det.get("in_roi", False)
+        # logger.info(f"detections annotated = {det}")
 
-        colour = _IN_ROI_COLOUR if in_roi else _COLOURS.get(label, _DEFAULT_COLOUR)
+        tid = int(det['track_id'])
+        colour = [int(c) for c in COLOURS[tid % 100]]
+        # colour = _IN_ROI_COLOUR if in_roi else _COLOURS.get(label, _DEFAULT_COLOUR)
 
         # Bounding box
         thickness = 3 if in_roi else 2

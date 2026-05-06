@@ -142,12 +142,13 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
                 "track_id":   int(d.get("track_id",   -1)),
                 "label":      str(d.get("label",       "")),
                 "confidence": round(float(d.get("confidence", 0.0)), 3),
-                "x1":         int(d.get("x1", 0)),
-                "y1":         int(d.get("y1", 0)),
-                "x2":         int(d.get("x2", 0)),
-                "y2":         int(d.get("y2", 0)),
+                "x1":         int(d["bbox"][0]),
+                "y1":         int(d["bbox"][1]),
+                "x2":         int(d["bbox"][2]),
+                "y2":         int(d["bbox"][3]),
                 "in_roi":     bool(d.get("in_roi", False)),
             })
+            # logger.info(f"detections serialized = {result[-1]}")
         return result
  
     @staticmethod
