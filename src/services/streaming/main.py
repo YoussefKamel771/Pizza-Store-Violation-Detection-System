@@ -23,9 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from annotator import annotate, jpeg_to_base64
 from config import get_settings
-from consumers.frame_consumer import FrameConsumerThread
 from consumers.result_consumer import ResultConsumerThread
-from frame_synchronizer import FrameSynchronizer
 from state_store import connection_manager, state_store
 from routes.websocket import router as ws_router
 from routes.violations import router as violations_router
@@ -47,40 +45,23 @@ async def lifespan(app: FastAPI):
     # --- Startup Logic ---
     logger.info("Starting streaming service…")
 
-    synchronizer = FrameSynchronizer(
-        max_size=settings.sync_buffer_max_size,
-        on_ready=on_frame_ready,
-    )
-
-    frame_thread = FrameConsumerThread(
-        bootstrap_servers=settings.kafka_bootstrap_servers,
-        topic=settings.kafka_frames_topic,
-        group_id=settings.kafka_frames_group,
-        synchronizer=synchronizer,
-    )
-
     result_thread = ResultConsumerThread(
         bootstrap_servers=settings.kafka_bootstrap_servers,
         topic=settings.kafka_detection_results_topic,
         group_id=settings.kafka_results_group,
-        synchronizer=synchronizer,
         state_store=state_store,
+        connection_manager=connection_manager,
+        jpeg_quality=settings.jpeg_quality,
     )
-
-    frame_thread.start()
     result_thread.start()
-    
-    # Store references in app.state to prevent GC
-    app.state.frame_thread = frame_thread
+ 
     app.state.result_thread = result_thread
-    
-    logger.info("Kafka consumer threads started.")
+    logger.info("Result consumer thread started.")
 
     yield  # The application runs here
 
     # --- Shutdown Logic ---
     logger.info("Shutting down streaming service…")
-    app.state.frame_thread.stop()
     app.state.result_thread.stop()
 
 # ── App Initialization ────────────────────────────────────────────────────────
@@ -99,43 +80,6 @@ app.add_middleware(
 
 app.include_router(ws_router)
 app.include_router(violations_router)
-
-# ── Synchronizer callback ─────────────────────────────────────────────────────
-
-def on_frame_ready(frame_id: int, jpeg_bytes: bytes, result: dict) -> None:
-    """
-    Called by FrameSynchronizer when both the raw frame and its detection
-    result are available for a given frame_id.
-
-    Steps:
-      1. Annotate the frame (draw boxes + violation banner)
-      2. Build the WebSocket message
-      3. Broadcast to all connected clients
-    """
-    violation   = result.get("violation")       # dict or None
-    detections  = result.get("detections", [])
-    timestamp   = result.get("timestamp", 0.0)
-    vcount      = result.get("violation_count", state_store.get_count())
-
-    # Draw on the frame
-    annotated_jpeg = annotate(
-        jpeg_bytes=jpeg_bytes,
-        detections=detections,
-        violation=violation,
-        jpeg_quality=settings.jpeg_quality,
-    )
-
-    message = {
-        "type":            "frame",
-        "frame_id":        frame_id,
-        "timestamp":       timestamp,
-        "frame":           jpeg_to_base64(annotated_jpeg),
-        "detections":      detections,
-        "violation":       violation,
-        "violation_count": vcount,
-    }
-
-    connection_manager.broadcast(message)
 
 
 # ── Dev entry point ───────────────────────────────────────────────────────────

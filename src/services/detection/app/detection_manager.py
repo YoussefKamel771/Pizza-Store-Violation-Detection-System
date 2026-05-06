@@ -92,7 +92,7 @@ class DetectionManager:
         # 5. Publish to detection-results (every frame, not just violations)
         if self.result_publisher is not None:
             self.result_publisher.publish(
-            # frame=frame,
+            frame=frame,
             frame_id=frame_id,
             timestamp=timestamp,
             detections=tracked_detections,

@@ -37,8 +37,8 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
                 "retries":           3,
                 "retry.backoff.ms":  300,
                 # Cap buffer so RAM doesn't grow if the streaming service is slow
-                "queue.buffering.max.messages": 500,
-                "queue.buffering.max.kbytes":   16384,  # 16 MB
+                "queue.buffering.max.messages": 100,
+                "queue.buffering.max.kbytes":   131072 ,  # 128 MB
                 "linger.ms":                    5,
             }
         )
@@ -56,7 +56,7 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
 
     def publish(
         self,
-        # frame: np.ndarray,
+        frame: np.ndarray,
         frame_id: int,
         timestamp: float,
         detections: list,
@@ -77,9 +77,9 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
             payload = {
                 "frame_id":        frame_id,
                 "timestamp":       timestamp,
-                # "frame":           _encode_frame(frame),
-                "detections":      _serialize_detections(detections),
-                "violation":       _serialize_violation(violation),
+                "frame":           self.encode_frame(frame),
+                "detections":      self._serialize_detections(detections),
+                "violation":       self._serialize_violation(violation),
                 "violation_count": violation_count,
             }
 
@@ -115,42 +115,52 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
                 msg.topic(), msg.partition(), msg.offset(),
             )
 
-# ── Serialisation helpers ─────────────────────────────────────────────────────
- 
+    @staticmethod
+    def encode_frame(frame, quality: int = 70) -> str:
+        """JPEG-compress and base64-encode a frame. Frees intermediate buffer immediately."""
+        success, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        if not success:
+            raise RuntimeError("cv2.imencode failed")
+        encoded = base64.b64encode(buffer).decode("utf-8")
+        del buffer      # free raw JPEG bytes right away
+        return encoded
 
-def _serialize_detections(detections: list) -> list:
-    """
-    Convert tracked detection dicts to a clean, JSON-safe list.
-    Each dict is expected to have at minimum:
-        track_id, label, confidence, x1, y1, x2, y2
-    and optionally:
-        in_roi (bool) — set by the engine when a hand enters an ROI
-    """
-    result = []
-    for d in detections:
-        result.append({
-            "track_id":   int(d.get("track_id",   -1)),
-            "label":      str(d.get("label",       "")),
-            "confidence": round(float(d.get("confidence", 0.0)), 3),
-            "x1":         int(d.get("x1", 0)),
-            "y1":         int(d.get("y1", 0)),
-            "x2":         int(d.get("x2", 0)),
-            "y2":         int(d.get("y2", 0)),
-            "in_roi":     bool(d.get("in_roi", False)),
-        })
-    return result
+    # ── Serialisation helpers ─────────────────────────────────────────────────────
  
+    @staticmethod
+    def _serialize_detections(detections: list) -> list:
+        """
+        Convert tracked detection dicts to a clean, JSON-safe list.
+        Each dict is expected to have at minimum:
+            track_id, label, confidence, x1, y1, x2, y2
+        and optionally:
+            in_roi (bool) — set by the engine when a hand enters an ROI
+        """
+        result = []
+        for d in detections:
+            result.append({
+                "track_id":   int(d.get("track_id",   -1)),
+                "label":      str(d.get("label",       "")),
+                "confidence": round(float(d.get("confidence", 0.0)), 3),
+                "x1":         int(d.get("x1", 0)),
+                "y1":         int(d.get("y1", 0)),
+                "x2":         int(d.get("x2", 0)),
+                "y2":         int(d.get("y2", 0)),
+                "in_roi":     bool(d.get("in_roi", False)),
+            })
+        return result
  
-def _serialize_violation(violation) -> Optional[dict]:
-    """
-    Serialize a domain Violation object.
-    Returns None (JSON null) if no violation occurred this frame.
-    """
-    if violation is None:
-        return None
-    return {
-        "violation_id": str(violation.id),
-        "track_id":     int(violation.track_id),
-        "frame_id":     int(violation.frame_id),
-        "roi_id":       str(violation.roi_name),
-    }
+    @staticmethod
+    def _serialize_violation(violation) -> Optional[dict]:
+        """
+        Serialize a domain Violation object.
+        Returns None (JSON null) if no violation occurred this frame.
+        """
+        if violation is None:
+            return None
+        return {
+            "violation_id": str(violation.id),
+            "track_id":     int(violation.track_id),
+            "frame_id":     int(violation.frame_id),
+            "roi_id":       str(violation.roi_name),
+        }

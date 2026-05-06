@@ -6,16 +6,14 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # ── Kafka ─────────────────────────────────────────────────────────────────
     kafka_bootstrap_servers: str       = os.getenv("KAFKA_BOOTSTRAP_SERVERS",        "localhost:29092")
-    kafka_frames_topic: str            = os.getenv("KAFKA_FRAMES_TOPIC",             "video-frames")
     kafka_detection_results_topic: str = os.getenv("KAFKA_DETECTION_RESULTS_TOPIC",  "detection-results")
-    kafka_frames_group: str            = os.getenv("KAFKA_FRAMES_GROUP",             "streaming-frames")
     kafka_results_group: str           = os.getenv("KAFKA_RESULTS_GROUP",            "streaming-results")
 
     # ── Sync buffer ───────────────────────────────────────────────────────────
     # How many frame_ids to keep in memory while waiting for the matching
     # detection result. Detection takes a few ms so the result arrives
     # shortly after the frame. 300 frames of buffer ≈ 20 seconds at 15fps.
-    sync_buffer_max_size: int = int(os.getenv("SYNC_BUFFER_MAX_SIZE", "300"))
+    sync_buffer_max_size: int = int(os.getenv("SYNC_BUFFER_MAX_SIZE", "600"))
 
     # ── Annotation ────────────────────────────────────────────────────────────
     jpeg_quality: int = int(os.getenv("JPEG_QUALITY", "80"))

@@ -1,4 +1,4 @@
-# 🍕 Scooper Violation Detection System
+# 🍕 Pizza Store Violation Detection System
 
 A real-time computer vision system that monitors pizza store hygiene compliance by detecting whether workers use a **scooper** when handling protein ingredients. Built on a microservices architecture with Kafka, YOLO, and WebSocket streaming.
 
@@ -35,28 +35,28 @@ Workers at pizza stations must use a scooper when picking up protein ingredients
 ## Architecture
 
 ```
-┌─────────────────┐      ┌──────────────────────┐      ┌───────────────────────┐
-│  Frame Reader   │────▶│   Kafka              │────▶ │  Detection Service    │
-│                 │      │   [video-frames]     │      │                       │
-│  OpenCV / RTSP  │      └──────────────────────┘      │  YOLO11 + ByteTrack   │
-└─────────────────┘                │                   │  Violation Engine     │
-                                   │                   │  PostgreSQL           │
-                                   │                   └──────────┬────────────┘
-                                   │                              │
-                                   │                  ┌───────────▼──────────┐
-                                   │                  │   Kafka               │
-                                   │                  │   [detection-results] │
-                                   │                  └──────────┬────────────┘
-                                   │                             │
-┌─────────────────┐     ┌──────────▼─────────────────────────────▼──────────┐
-│    Frontend     │◀────│              Streaming Service                    │
-│                 │     │                                                    │
-│  WebSocket      │     │  Frame Sync (by frame_id) → Annotator → WebSocket  │
-│  REST polling   │     │  REST API  /violations/count  /violations          │
-└─────────────────┘     └────────────────────────────────────────────────────┘
+┌─────────────────┐     ┌──────────────────────┐     ┌───────────────────────┐
+│  Frame Reader   │────▶│   Kafka              │────▶│  Detection Service    │
+│                 │     │   [video-frames]     │     │                       │
+│  OpenCV / RTSP  │     └──────────────────────┘     │  YOLO11 + ByteTrack   │
+└─────────────────┘                                  │  Violation Engine     │
+                                                     │  PostgreSQL           │
+                                                     └──────────┬────────────┘
+                                                                │
+                                                     ┌──────────▼────────────┐
+                                                     │   Kafka               │
+                                                     │   [detection-results] │
+                                                     └──────────┬────────────┘
+                                                                │
+  ┌─────────────────┐     ┌─────────────────────────────────────▼────────┐
+  │    Frontend     │◀────│              Streaming Service               │
+  │                 │     │                                               │
+  │  WebSocket      │     │  Receive message → Annotator → WebSocket      │
+  │  REST polling   │     │  REST API  /violations/count  /violations     │
+  └─────────────────┘     └───────────────────────────────────────────────┘
 ```
 
-**Key design decision — frame_id sync:** The detection service publishes lightweight metadata only (no frame bytes) to `detection-results`. The streaming service already has the raw frame from `video-frames` and joins both streams using `frame_id` as the key. This eliminates sending frame data twice over Kafka (~100–200 KB saved per frame).
+**Key design decision — Unified Data Stream:** To reduce architectural complexity and synchronization overhead, the detection service now publishes the full payload (metadata + frame bytes) to detection-results. This transforms the pipeline into a linear flow, allowing the streaming service to act as a simple pass-through annotator without needing to buffer or join separate topics.
 
 ---
 
@@ -81,9 +81,8 @@ The core intelligence of the system. Subscribes to `video-frames`, runs the ML p
 - Publishes to `detection-results`: frame_id + detections + violation (if any) + running count
 
 ### 3. Streaming Service
-Consumes both Kafka topics, synchronises by `frame_id`, annotates frames, and serves them in real-time.
+Consumes the enriched `detection-results` topic, annotates the frames, and serves them in real-time.
 
-- **Frame Synchronizer** — thread-safe buffer that joins frames + detection results by `frame_id`
 - **Annotator** — OpenCV draws bounding boxes, ROI highlights, and a red violation banner
 - **WebSocket** `/ws/stream` — broadcasts annotated frames to all connected clients
 - **REST API** — `/violations/count` and `/violations` for the frontend dashboard
@@ -140,12 +139,10 @@ scooper-violation-system/
 │
 ├── streaming_service/              # Service 3
 │   ├── main.py                     # FastAPI app — starts background threads
-│   ├── frame_synchronizer.py       # Joins frames + results by frame_id
 │   ├── state_store.py              # Thread-safe violation store + WS registry
 │   ├── annotator.py                # OpenCV frame annotation
 │   ├── config.py
 │   ├── consumers/
-│   │   ├── frame_consumer.py       # Daemon thread: video-frames topic
 │   │   └── result_consumer.py      # Daemon thread: detection-results topic
 │   ├── routes/
 │   │   ├── websocket.py            # WS /ws/stream

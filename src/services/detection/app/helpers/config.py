@@ -23,6 +23,8 @@ class Settings(BaseSettings):
         "postgresql://postgres:password@localhost:5432/scooper_db",
     )
 
+    JPEG_QUALITY: int = int(os.getenv("JPEG_QUALITY", "70"))
+
     class Config:
         env_file = "../.env"
         env_file_encoding = "utf-8"
