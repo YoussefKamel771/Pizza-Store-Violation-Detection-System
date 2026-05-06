@@ -35,23 +35,23 @@ Workers at pizza stations must use a scooper when picking up protein ingredients
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────────┐     ┌───────────────────────┐
-│  Frame Reader   │────▶│   Kafka              │────▶│  Detection Service    │
-│                 │     │   [video-frames]     │     │                       │
-│  OpenCV / RTSP  │     └──────────────────────┘     │  YOLO11 + ByteTrack   │
-└─────────────────┘                                  │  Violation Engine     │
-                                                     │  PostgreSQL           │
-                                                     └──────────┬────────────┘
-                                                                │
-                                                     ┌──────────▼────────────┐
-                                                     │   Kafka               │
-                                                     │   [detection-results] │
-                                                     └──────────┬────────────┘
-                                                                │
-┌─────────────────┐     ┌──────────────────────────────────────▼────────────┐
-│    Frontend     │◀────│              Streaming Service                     │
+┌─────────────────┐      ┌──────────────────────┐      ┌───────────────────────┐
+│  Frame Reader   │────▶│   Kafka              │────▶ │  Detection Service    │
+│                 │      │   [video-frames]     │      │                       │
+│  OpenCV / RTSP  │      └──────────────────────┘      │  YOLO11 + ByteTrack   │
+└─────────────────┘                │                   │  Violation Engine     │
+                                   │                   │  PostgreSQL           │
+                                   │                   └──────────┬────────────┘
+                                   │                              │
+                                   │                  ┌───────────▼──────────┐
+                                   │                  │   Kafka               │
+                                   │                  │   [detection-results] │
+                                   │                  └──────────┬────────────┘
+                                   │                             │
+┌─────────────────┐     ┌──────────▼─────────────────────────────▼──────────┐
+│    Frontend     │◀────│              Streaming Service                    │
 │                 │     │                                                    │
-│  WebSocket      │     │  Frame Sync (by frame_id) → Annotator → WebSocket │
+│  WebSocket      │     │  Frame Sync (by frame_id) → Annotator → WebSocket  │
 │  REST polling   │     │  REST API  /violations/count  /violations          │
 └─────────────────┘     └────────────────────────────────────────────────────┘
 ```
