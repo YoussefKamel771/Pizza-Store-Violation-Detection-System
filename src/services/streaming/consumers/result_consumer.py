@@ -55,7 +55,7 @@ class ResultConsumerThread(threading.Thread):
 
         try:
             while not self._stop_event.is_set():
-                msg = consumer.poll(timeout=1.0)
+                msg = consumer.poll(timeout=0.05)
 
                 if msg is None:
                     continue
