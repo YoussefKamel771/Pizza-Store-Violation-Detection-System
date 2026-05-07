@@ -20,7 +20,7 @@ import time
 
 from confluent_kafka import Consumer, KafkaError, KafkaException
 import numpy as np
-
+from datetime import datetime, timezone
 from state_store import ConnectionManager, StateStore
 
 logger = logging.getLogger(__name__)
@@ -82,8 +82,8 @@ class ResultConsumerThread(threading.Thread):
     def _process(self, result: dict) -> None:
         frame_b64       = result["frame"]
         frame_id        = result["frame_id"]
-        timestamp       = result["timestamp"]
-        # detections      = result.get("detections", [])
+        # Convert float to ISO 8601 string (e.g., "2026-05-07T12:00:00+00:00")
+        formatted_ts = datetime.fromtimestamp(result["timestamp"], tz=timezone.utc).isoformat()
         violation       = result.get("violation")       # dict or None
         violation_count = result.get("violation_count", 0)
  
@@ -91,6 +91,7 @@ class ResultConsumerThread(threading.Thread):
         if violation is not None:
             violation["frame_id"]        = frame_id
             violation["violation_count"] = violation_count
+            violation["timestamp"]       = formatted_ts
             self._state_store.add_violation(violation)
             logger.info(
                 "Violation recorded | id=%s  frame_id=%d  total=%d",
@@ -101,7 +102,7 @@ class ResultConsumerThread(threading.Thread):
         self._connection_manager.broadcast({
             "type":            "frame",
             "frame_id":        frame_id,
-            "timestamp":       timestamp,
+            "timestamp":       formatted_ts,
             "frame":           frame_b64,
             # "detections":      detections,
             "violation":       violation,

@@ -11,7 +11,7 @@ import threading
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
-
+import asyncio
 
 @dataclass
 class ViolationRecord:
@@ -19,6 +19,7 @@ class ViolationRecord:
     frame_id:     int
     track_id:     int
     roi_id:       str
+    timestamp: str
 
 
 # "violation_id": str(violation.id),
@@ -39,6 +40,7 @@ class StateStore:
             frame_id     = violation_dict.get("frame_id", -1),
             track_id     = violation_dict["track_id"],
             roi_id       = violation_dict["roi_id"],
+            timestamp= violation_dict.get("timestamp", ""),
         )
         with self._lock:
             # Use the authoritative count from the detection service
@@ -61,6 +63,7 @@ class StateStore:
                 "frame_id":     v.frame_id,
                 "track_id":     v.track_id,
                 "roi_id":       v.roi_id,
+                "timestamp":    v.timestamp,
             }
             for v in items[:limit]
         ]
@@ -73,30 +76,40 @@ class ConnectionManager:
 
     def __init__(self):
         self._lock  = threading.Lock()
-        self._conns = set()     # set of asyncio.Queue — one per connected client
+        self._conns = {}          # queue → event_loop
 
-    def add(self, queue) -> None:
+
+    def add(self, queue, loop) -> None:      # ← accept the loop
         with self._lock:
-            self._conns.add(queue)
+            self._conns[queue] = loop
 
     def remove(self, queue) -> None:
         with self._lock:
-            self._conns.discard(queue)
+            self._conns.pop(queue, None)
+
 
     def broadcast(self, message: dict) -> None:
-        """
-        Put the message into every client's queue.
-        The WebSocket route handler pulls from its own queue and sends to client.
-        Using per-client queues decouples the Kafka thread from FastAPI's event loop.
-        """
         with self._lock:
-            conns = list(self._conns)
-        for q in conns:
-            try:
-                q.put_nowait(message)
-            except Exception:
-                pass  # queue full or closed — client will be cleaned up on disconnect
+            pairs = list(self._conns.items())
+        for q, loop in pairs:
+           loop.call_soon_threadsafe(_put_or_drop, q, message)
 
+def _put_or_drop(q: asyncio.Queue, message: dict) -> None:
+    """
+    For a live video stream we always want the *latest* frame.
+    If the consumer is behind, evict the oldest queued frame and
+    enqueue the new one — this keeps latency low instead of building
+    a growing backlog.
+    """
+    if q.full():
+        try:
+            q.get_nowait()   # discard oldest frame
+        except asyncio.QueueEmpty:
+            pass
+    try:
+        q.put_nowait(message)
+    except asyncio.QueueFull:
+        pass   # extremely unlikely after the drain above; just drop
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 state_store        = StateStore()

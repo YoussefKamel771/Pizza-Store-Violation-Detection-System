@@ -89,11 +89,11 @@ class KafkaStreamer(IPublisherPort):
                 on_delivery=self._on_delivery,
             )
             if violation is not None:
-                # logger.info(
-                #     "Published violation | frame_id=%d  track_id=%d  roi=%s",
-                #     violation.frame_id, violation.track_id, violation.roi_name,
-                # )
-                logger.info("published violations = %s", violation)
+                logger.info(
+                    "Published violation | frame_id=%d  track_id=%d  roi=%s timestamp=%s  total=%d",
+                    violation.frame_id, violation.track_id, violation.roi_name, violation.timestamp, violation_count
+                )
+                # logger.info("published violations = %s", violation)
             else:
                 logger.info("Published frame %d — no violation.  violation=%s violation_count=%d",
                              frame_id, violation, violation_count)
@@ -139,6 +139,7 @@ class KafkaStreamer(IPublisherPort):
             "track_id":     int(violation.track_id),
             "frame_id":     int(violation.frame_id),
             "roi_id":       str(violation.roi_name),
+            "timestamp":    str(violation.timestamp),
         }
  
     # @staticmethod

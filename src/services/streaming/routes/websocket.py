@@ -15,12 +15,6 @@ Message sent to frontend (JSON):
     "frame_id":        42,
     "timestamp":       1714300000.123,
     "frame":           "<base64 annotated JPEG>",
-    "detections": [
-        {
-            "track_id": 1, "label": "Hand", "confidence": 0.95,
-            "x1": 100, "y1": 200, "x2": 150, "y2": 250, "in_roi": true
-        }
-    ],
     "violation":       null,        // or violation dict
     "violation_count": 3
 }
@@ -48,7 +42,8 @@ async def websocket_stream(websocket: WebSocket):
     # maxsize=30 → if a slow client can't keep up, old frames are dropped
     # to prevent memory build-up.
     queue: asyncio.Queue = asyncio.Queue(maxsize=30)
-    connection_manager.add(queue)
+    loop = asyncio.get_event_loop()          # ← grab the running loop
+    connection_manager.add(queue, loop)      # ← pass it in
 
     try:
         while True:

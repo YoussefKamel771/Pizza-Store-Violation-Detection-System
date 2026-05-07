@@ -21,7 +21,6 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from annotator import annotate, jpeg_to_base64
 from config import get_settings
 from consumers.result_consumer import ResultConsumerThread
 from state_store import connection_manager, state_store
