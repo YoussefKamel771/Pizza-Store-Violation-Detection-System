@@ -13,15 +13,14 @@ This thread:
   4. Updates the StateStore when a violation is present
 """
 
-import base64
 import json
 import logging
 import threading
 import time
 
 from confluent_kafka import Consumer, KafkaError, KafkaException
+import numpy as np
 
-from annotator import jpeg_to_base64, annotate
 from state_store import ConnectionManager, StateStore
 
 logger = logging.getLogger(__name__)
@@ -81,22 +80,12 @@ class ResultConsumerThread(threading.Thread):
     # ── Message processing ────────────────────────────────────────────────────
  
     def _process(self, result: dict) -> None:
+        frame_b64       = result["frame"]
         frame_id        = result["frame_id"]
         timestamp       = result["timestamp"]
-        detections      = result.get("detections", [])
+        # detections      = result.get("detections", [])
         violation       = result.get("violation")       # dict or None
         violation_count = result.get("violation_count", 0)
- 
-        # 1. Decode the raw JPEG frame sent by the detection service
-        jpeg_bytes = base64.b64decode(result["frame"])
- 
-        # 2. Draw bounding boxes and violation banner
-        annotated_jpeg = annotate(
-            jpeg_bytes=jpeg_bytes,
-            detections=detections,
-            violation=violation,
-            jpeg_quality=self._jpeg_quality,
-        )
  
         # 3. Update violation state store
         if violation is not None:
@@ -113,8 +102,8 @@ class ResultConsumerThread(threading.Thread):
             "type":            "frame",
             "frame_id":        frame_id,
             "timestamp":       timestamp,
-            "frame":           jpeg_to_base64(annotated_jpeg),
-            "detections":      detections,
+            "frame":           frame_b64,
+            # "detections":      detections,
             "violation":       violation,
             "violation_count": violation_count,
         })
@@ -141,3 +130,4 @@ class ResultConsumerThread(threading.Thread):
                 wait = min(2 ** retries, 30)
                 logger.warning("Kafka not ready (attempt %d): %s — retry in %ds", retries, exc, wait)
                 time.sleep(wait)
+
