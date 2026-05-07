@@ -55,7 +55,10 @@
 const { useState, useEffect, useRef, useCallback } = React;
 
 /* ── Helpers ──────────────────────────────────────── */
-const fmt  = d => d.toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+const fmt = d => {
+  if (!d || !(d instanceof Date) || isNaN(d)) return '--:--:--';
+  return d.toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+};
 const fmtD = d => d.toLocaleDateString('en-US',  { year:'numeric', month:'short', day:'2-digit' }).toUpperCase();
 const pad3 = n => String(Math.max(0, n)).padStart(3, '0');
 const pad2 = n => String(Math.max(0, n)).padStart(2, '0');
@@ -110,7 +113,8 @@ function App() {
   // ── FIX 1: hasFrame tracks whether we've received at least one frame
   //    so we can show/hide the no-signal placeholder without storing
   //    the frame bytes in React state at all.
-  const [hasFrame,   setHasFrame]   = useState(false);
+  const hasFrameRef  = useRef(false);
+  const [hasFrame, setHasFrame] = useState(false);
 
   const [count,      setCount]      = useState(0);
   const [incidents,  setIncidents]  = useState([]);
@@ -184,8 +188,6 @@ function App() {
                   canvas.height = img.naturalHeight;
                 }
                 canvas.getContext('2d').drawImage(img, 0, 0);
-                // Revoke the object URL to free memory
-                URL.revokeObjectURL(img.src);
               };
               // Convert base64 → Blob → Object URL (faster than data: URI for large frames)
               // const bytes  = atob(msg.frame);
@@ -196,13 +198,19 @@ function App() {
               img.src = `data:image/jpeg;base64,${msg.frame}`;
 
               // Only set hasFrame once — purely to unmount the no-signal placeholder
-              if (!hasFrame) setHasFrame(true);
+              if (!hasFrameRef.current) {
+                  hasFrameRef.current = true;
+                  setHasFrame(true);       // triggers exactly one re-render, never again
+              }
             }
 
             // ── Update violation count (only triggers re-render when count changes)
-            if (msg.violation_count != null && msg.violation_count !== count) {
-              countKey.current++;
-              setCount(msg.violation_count);
+            if (msg.violation_count != null) {
+                setCount(prev => {
+                    if (prev === msg.violation_count) return prev;   // bail out if unchanged
+                    countKey.current++;
+                    return msg.violation_count;
+                });
             }
 
             // ── Update detection list (only when detections actually changed)
@@ -581,8 +589,22 @@ function App() {
     </div>
   );
 }
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) return (
+      <div style={{color:'#ff1a2e', padding:40, fontFamily:'IBM Plex Mono, monospace', background:'#060810', height:'100vh'}}>
+        <div style={{fontSize:12, marginBottom:8, letterSpacing:'0.2em'}}>⚠ RENDER ERROR</div>
+        <div style={{fontSize:14, fontWeight:700}}>{this.state.error.message}</div>
+        <pre style={{marginTop:16, fontSize:10, color:'#475569', whiteSpace:'pre-wrap'}}>{this.state.error.stack}</pre>
+      </div>
+    );
+    return this.props.children;
+  }
+}
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-</script>
+ReactDOM.createRoot(document.getElementById('root'))
+  .render(<ErrorBoundary><App /></ErrorBoundary>);</script>
 </body>
 </html>

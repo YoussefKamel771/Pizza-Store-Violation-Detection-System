@@ -91,6 +91,7 @@
             const [detections, setDetections] = useState([]);
             const [isFlashing, setIsFlashing] = useState(false);
             const [fps, setFps] = useState(0);
+            const [pendingTick, setPendingTick] = useState(0);
             
             // Use refs for ALL WebSocket and DOM-related state to prevent re-renders
             const imgRef = useRef(null);
@@ -166,7 +167,7 @@
                     }
                     isProcessingViolation.current = false;
                 }, 600);
-            }, [violations.length]); // Trigger when violations change to process pending
+            }, [pendingTick]); // Trigger when violations change to process pending
 
             // WebSocket connection - ONLY ONCE
             useEffect(() => {
@@ -218,7 +219,7 @@
                                     };
                                     pendingViolationsRef.current.push(violation);
                                     // Force a re-render to trigger the batch processor
-                                    setViolations(prev => [...prev]);
+                                    setPendingTick(t => t + 1); 
                                 }
                             } catch (e) {
                                 console.error('WS message error:', e);
@@ -367,10 +368,10 @@
                                     <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                                         <Icon name="history" size={16} /> Recent Incidents
                                     </h3>
-                                    <span className="text-xs px-2 py-0.5 rounded-full bg-emergency-500/20 text-emergency-400 font-mono">{violations.length}</span>
+                                    <span className="text-xs px-2 py-0.5 rounded-full bg-emergency-500/20 text-emergency-400 font-mono">{pendingTick}</span>
                                 </div>
                                 <div className="flex-1 overflow-y-auto space-y-2 scrollbar-hide pr-1">
-                                    {violations.length === 0 ? (
+                                    {pendingTick === 0 ? (
                                         <div className="flex flex-col items-center justify-center h-full text-slate-600">
                                             <Icon name="shield-check" size={32} className="mb-2 opacity-50" />
                                             <p className="text-sm">No violations recorded</p>
