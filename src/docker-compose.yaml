@@ -1,0 +1,196 @@
+version: '3.8'
+ 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Scooper Violation Detection System — Docker Compose
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+#  Services:
+#    kafka            — Message broker (KRaft, no ZooKeeper)
+#    postgres         — Violation metadata store
+#    frame-reader     — Reads video / RTSP, publishes frames to Kafka
+#    detection        — YOLO + ByteTrack + violation engine
+#    streaming        — Annotates frames, serves WebSocket + REST API
+#
+#  Quick start:
+#    1. Copy .env.example to .env and fill in values
+#    2. Place your video at ./videos/sample.mp4
+#    3. Place your YOLO weights at ./weights/best.pt
+#    4. Run:  python detection_service/run_local.py   (draws ROIs, saves rois.json)
+#    5. Run:  docker-compose up --build
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+x-kafka-env: &kafka-env
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.8.3
+    container_name: kafka
+    ports:
+      - "9092:9092"   # Internal Docker network (used by other containers)
+      - "29092:29092" # External / host machine access (for testing locally)
+
+    environment:
+      KAFKA_KRAFT_MODE: 'true'
+
+      CLUSTER_ID: '1L6g7nGhU-eAKfL--X25wo'
+      KAFKA_NODE_ID: 1
+
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1 # 1 means No backup for metadata, just one copy
+
+      # ── Listeners ──────────────────────────────────────────────────────────
+      # Three listeners:
+      #   CONTROLLER  :9093  — internal KRaft leader election (never exposed)
+      #   INTERNAL   :9092  — host machine access (kafka, Kafka UI)
+      #   EXTERNAL    :29092 — Docker-network inter-service communication. used by your host machine (localhost:29092)
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+
+      # Auto-create topics on first publish (convenient for dev)
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+
+      # 1. Time-based retention (e.g., 1 hour)
+      KAFKA_LOG_RETENTION_HOURS: 1
+      
+      # 2. Size-based retention (e.g., 2GB total per partition)
+      # 2147483648 bytes = 2GB
+      KAFKA_LOG_RETENTION_BYTES: 2147483648
+      
+      # 3. Segment size (e.g., 100MB)
+      # Kafka deletes data when a "segment" file is finished. 
+      # Smaller segments = more frequent and accurate cleanup.
+      KAFKA_LOG_SEGMENT_BYTES: 104857600
+      
+      # 4. How often Kafka checks for things to delete (e.g., every 5 minutes)
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-scooper}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scooper_pass}
+      POSTGRES_DB:       ${POSTGRES_DB:-scooper_db}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-scooper} -d ${POSTGRES_DB:-scooper_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Frame Reader ───────────────────────────────────────────────────────────
+  frame-reader:
+    build:
+      context: ./frame_reader
+      dockerfile: Dockerfile
+    container_name: frame-reader
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: *kafka-env
+      KAFKA_TOPIC:   ${KAFKA_FRAMES_TOPIC:-video-frames}
+      VIDEO_SOURCE:  ${VIDEO_SOURCE:-/videos/sample.mp4}
+      MAX_FPS:       ${MAX_FPS:-15}
+      JPEG_QUALITY:  ${JPEG_QUALITY:-80}
+    volumes:
+      # Mount your local videos folder here
+      - ./videos:/videos:ro
+ 
+  # ── Detection Service ──────────────────────────────────────────────────────
+  detection:
+    build:
+      context: ./detection_service
+      dockerfile: Dockerfile
+    container_name: detection
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *kafka-env
+      KAFKA_FRAMES_TOPIC:            ${KAFKA_FRAMES_TOPIC:-video-frames}
+      KAFKA_DETECTION_RESULTS_TOPIC: ${KAFKA_DETECTION_RESULTS_TOPIC:-detection-results}
+      KAFKA_GROUP_ID:                ${KAFKA_GROUP_ID:-detection-service}
+      MODEL_PATH:                    /weights/best.pt
+      ROI_CONFIG_PATH:               /config/rois.json
+      DB_CONN_STR: >-
+        postgresql://${POSTGRES_USER:-scooper}:${POSTGRES_PASSWORD:-scooper_pass}
+        @postgres:5432/${POSTGRES_DB:-scooper_db}
+    volumes:
+      # Model weights (read-only)
+      - ./weights:/weights:ro
+      # ROI config (read-only — created by run_local.py before docker-compose up)
+      - ./config:/config:ro
+      # Violation frames are saved here
+      - ./violations:/violations
+ 
+    # ── GPU support (uncomment if you have an NVIDIA GPU + nvidia-docker) ────
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+ 
+  # ── Streaming Service ──────────────────────────────────────────────────────
+  streaming:
+    build:
+      context: ./streaming_service
+      dockerfile: Dockerfile
+    container_name: streaming
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "${STREAMING_PORT:-8000}:8000"
+    environment:
+      <<: *kafka-env
+      KAFKA_DETECTION_RESULTS_TOPIC: ${KAFKA_DETECTION_RESULTS_TOPIC:-detection-results}
+      KAFKA_RESULTS_GROUP:           ${KAFKA_RESULTS_GROUP:-streaming-results}
+      JPEG_QUALITY:                  ${JPEG_QUALITY:-80}
+      PORT:                          8000
+
+  frontend:
+    build: ./frontend
+    container_name: scooper-frontend
+    ports:
+      - "3000:80"  # Access the dashboard at http://localhost:3000
+    restart: always
+
+# ── Named volumes ──────────────────────────────────────────────────────────────
+volumes:
+  kafka-data:
+  postgres-data:
+
+# ── Network ────────────────────────────────────────────────────────────────────
+# All services share one bridge network so they resolve each other by name.
+networks:
+  default:
+    name: scooper-net

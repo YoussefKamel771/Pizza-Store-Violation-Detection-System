@@ -1,0 +1,11 @@
+# torch and torchvision are installed separately in the Dockerfile
+# (CPU wheel via --index-url) so they are NOT listed here.
+
+ultralytics==8.3.170          # YOLO12 / YOLO11 — includes all YOLO variants
+opencv-python==4.11.0.86
+numpy==1.26.1
+confluent-kafka==2.11.0
+SQLAlchemy==2.0.49
+pydantic-settings==2.13.1
+supervision==0.25.1          # ByteTrack tracker
+lapx==0.5.5                  # Linear assignment (required by ByteTrack)
