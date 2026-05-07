@@ -7,12 +7,12 @@ from typing import Any, Optional
 from confluent_kafka import Producer, KafkaException
 import cv2
 import numpy as np
-from core.interfaces import IDetectionResultPublisher
+from core.interfaces import IPublisherPort
 
 logger = logging.getLogger(__name__)
 
 
-class KafkaDetectionsPublisher(IDetectionResultPublisher):
+class KafkaStreamer(IPublisherPort):
     """
     Publishes detection results to the 'detections' Kafka topic so the
     Streaming Service can forward them to the frontend in real-time.
@@ -59,7 +59,7 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
         frame: np.ndarray,
         frame_id: int,
         timestamp: float,
-        detections: list,
+        # detections: list,
         violation,          # domain Violation object or None
         violation_count: int,
     ) -> None:
@@ -78,7 +78,7 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
                 "frame_id":        frame_id,
                 "timestamp":       timestamp,
                 "frame":           self.encode_frame(frame),
-                "detections":      self._serialize_detections(detections),
+                # "detections":      self._serialize_detections(detections),
                 "violation":       self._serialize_violation(violation),
                 "violation_count": violation_count,
             }
@@ -95,8 +95,8 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
                 # )
                 logger.info("published violations = %s", violation)
             else:
-                logger.info("Published frame %d — no violation. detections=%d violation=%s violation_count=%d",
-                             frame_id, len(detections), violation, violation_count)
+                logger.info("Published frame %d — no violation.  violation=%s violation_count=%d",
+                             frame_id, violation, violation_count)
             # Non-blocking poll to trigger delivery callbacks
             self._producer.poll(0)
 
@@ -126,31 +126,6 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
         return encoded
 
     # ── Serialisation helpers ─────────────────────────────────────────────────────
- 
-    @staticmethod
-    def _serialize_detections(detections: list) -> list:
-        """
-        Convert tracked detection dicts to a clean, JSON-safe list.
-        Each dict is expected to have at minimum:
-            track_id, label, confidence, x1, y1, x2, y2
-        and optionally:
-            in_roi (bool) — set by the engine when a hand enters an ROI
-        """
-        result = []
-        for d in detections:
-            result.append({
-                "track_id":   int(d.get("track_id",   -1)),
-                "label":      str(d.get("label",       "")),
-                "confidence": round(float(d.get("confidence", 0.0)), 3),
-                "x1":         int(d["bbox"][0]),
-                "y1":         int(d["bbox"][1]),
-                "x2":         int(d["bbox"][2]),
-                "y2":         int(d["bbox"][3]),
-                "in_roi":     bool(d.get("in_roi", False)),
-            })
-            # logger.info(f"detections serialized = {result[-1]}")
-        return result
- 
     @staticmethod
     def _serialize_violation(violation) -> Optional[dict]:
         """
@@ -165,3 +140,28 @@ class KafkaDetectionsPublisher(IDetectionResultPublisher):
             "frame_id":     int(violation.frame_id),
             "roi_id":       str(violation.roi_name),
         }
+ 
+    # @staticmethod
+    # def _serialize_detections(detections: list) -> list:
+    #     """
+    #     Convert tracked detection dicts to a clean, JSON-safe list.
+    #     Each dict is expected to have at minimum:
+    #         track_id, label, confidence, x1, y1, x2, y2
+    #     and optionally:
+    #         in_roi (bool) — set by the engine when a hand enters an ROI
+    #     """
+    #     result = []
+    #     for d in detections:
+    #         result.append({
+    #             "track_id":   int(d.get("track_id",   -1)),
+    #             "label":      str(d.get("label",       "")),
+    #             "confidence": round(float(d.get("confidence", 0.0)), 3),
+    #             "x1":         int(d["bbox"][0]),
+    #             "y1":         int(d["bbox"][1]),
+    #             "x2":         int(d["bbox"][2]),
+    #             "y2":         int(d["bbox"][3]),
+    #             "in_roi":     bool(d.get("in_roi", False)),
+    #         })
+    #         # logger.info(f"detections serialized = {result[-1]}")
+    #     return result
+ 

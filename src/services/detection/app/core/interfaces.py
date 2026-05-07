@@ -83,7 +83,7 @@ class IConsumerPort(ABC):
 
 # ── Violation Publisher (writes violations TO broker) ─────────────────────────
  
-class IDetectionResultPublisher(ABC):
+class IPublisherPort(ABC): 
     """
     Publishes every processed frame — detections + optional violation —
     to the detection-results Kafka topic.
@@ -110,7 +110,7 @@ class IDetectionResultPublisher(ABC):
         self,
         frame_id: int,
         timestamp: float,
-        detections: list, # list of tracked detection dicts
+        # detections: list, # list of tracked detection dicts
         violation,        # domain Violation object or None
         violation_count: int,
     ) -> None:
@@ -119,7 +119,7 @@ class IDetectionResultPublisher(ABC):
         violation=None means no violation occurred this frame.
         """
  
-    def __enter__(self) -> "IDetectionResultPublisher":
+    def __enter__(self) -> "IPublisherPort":
         self.connect()
         return self
  

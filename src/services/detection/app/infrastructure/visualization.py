@@ -8,14 +8,17 @@ from infrastructure.roi_manager import RoiManager
 logger = logging.getLogger(__name__)
 
 class Visualizer:
+    
+
     def __init__(self):
         # Store last N positions to draw trails
         self.history = {} 
         self.max_history = 20
         # Generate stable colors for IDs
         self.colors = np.random.randint(0, 255, size=(100, 3), dtype=np.uint8)
+        self._VIOLATION_COLOUR  = (  0,   0, 255)   # red
 
-    def draw_frame(self, frame, tracked_objects, roi_manager: RoiManager, violations=None):
+    def draw_frame(self, frame, tracked_objects, roi_manager: RoiManager, violation, violation_count):
         """
         Main drawing function.
         """
@@ -23,6 +26,13 @@ class Visualizer:
         for roi in roi_manager.rois:
             # logger.debug("Drawing ROI %s with color %s", roi.name, roi.color)
             roi.draw(frame)
+
+        h, w = frame.shape[:2]
+
+        if violation is not None:
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (w, h), self._VIOLATION_COLOUR, -1)
+            cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
 
         # 2. Draw Tracked Objects
         for obj in tracked_objects:
@@ -48,10 +58,14 @@ class Visualizer:
                 self._draw_trails(frame, tid, obj['centroid'], color)
 
         # 4. Global Violation Overlay
-        if violations:
-            cv2.rectangle(frame, (0, 0), (frame.shape[1], 40), (0, 0, 255), -1)
-            cv2.putText(frame, f"VIOLATION ALERT: {len(violations)} ACTIVE", (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        if violation:
+            banner = f"  VIOLATION  ROI: {violation.roi_name}  Worker: #{violation.track_id}"
+            cv2.rectangle(frame, (0, 0), (w, 40), self._VIOLATION_COLOUR, -1)
+            cv2.putText(frame, banner, (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+            
+        cv2.putText(frame, f"Violations: {violation_count}", (15, 35), cv2.FONT_HERSHEY_SIMPLEX,
+                            1.0,(0, 0, 255),2,cv2.LINE_AA,)
 
         return frame
 

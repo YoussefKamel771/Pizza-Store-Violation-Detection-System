@@ -23,7 +23,7 @@ from helpers.config import get_settings
 from infrastructure.detector import YOLO11Detector
 from infrastructure.byteTrack_tracker import ByteTrackTracker
 from infrastructure.kafka_consumer import KafkaFrameConsumer
-from infrastructure.kafka_streamer import KafkaDetectionsPublisher
+from infrastructure.kafka_streamer import KafkaStreamer
 from infrastructure.postgress_repo import PostgresRepository
 from infrastructure.roi_manager import RoiManager
 from domain.engine import ScooperViolationEngine
@@ -62,7 +62,7 @@ def main() -> None:
         topic=settings.kafka_frames_topic,
         group_id=settings.kafka_group_id,
     )
-    publisher = KafkaDetectionsPublisher(
+    publisher = KafkaStreamer(
         bootstrap_servers=settings.kafka_bootstrap_servers,
         topic=settings.kafka_detection_results_topic,
     )
@@ -77,7 +77,8 @@ def main() -> None:
         engine=engine,
         result_publisher=publisher,
         roi_manager=roi_manager,
-        visualizer=visualizer if visualizer else None,
+        visualizer=visualizer,
+        vis=True,  # Visualization not needed in production mode
     )
 
     # ── Handle Ctrl+C gracefully ──────────────────────────────────────────────

@@ -11,10 +11,10 @@ import cv2
 import numpy as np
 
 from core.interfaces import (
-    IDetectionResultPublisher,
     IDetector,
     ITracker,
     IConsumerPort,
+    IPublisherPort,
     IViolationRepository,
 )
 from domain.engine import ScooperViolationEngine
@@ -29,12 +29,13 @@ class DetectionManager:
         self,
         detector:            IDetector,
         tracker:             ITracker,
-        broker:              IConsumerPort | None,   # None when running locally
+        broker:              IConsumerPort,   # None when running locally
         repo:                IViolationRepository,
         engine:              ScooperViolationEngine,
-        result_publisher:   IDetectionResultPublisher | None = None,  # None in local mode
+        visualizer:          Visualizer,        # Optional for visualization
+        result_publisher:   IPublisherPort | None = None,  # None in local mode
         roi_manager:         RoiManager | None = None,         # Optional for visualization
-        visualizer:          Visualizer | None = None,        # Optional for visualization
+        vis: bool = False,  # Whether to show visualization window (local mode only)
     ):
         self.detector            = detector
         self.tracker             = tracker
@@ -44,7 +45,7 @@ class DetectionManager:
         self.result_publisher = result_publisher
         self.roi_manager         =  roi_manager 
         self.visualizer          =  visualizer
-
+        self.vis                 =  vis
         self._violation_count = 0
 
     # ── Core per-frame logic ──────────────────────────────────────────────────
@@ -89,25 +90,24 @@ class DetectionManager:
             # Persist to Postgres
             self.repo.save_violation(violation)
 
+        if self.visualizer is not None:
+            annotated_frame = self.visualizer.draw_frame(
+                frame.copy(), tracked_detections, self.roi_manager, violation, self._violation_count, 
+            )
+
         # 5. Publish to detection-results (every frame, not just violations)
         if self.result_publisher is not None:
             self.result_publisher.publish(
-            frame=frame,
+            frame=annotated_frame,
             frame_id=frame_id,
             timestamp=timestamp,
-            detections=tracked_detections,
+            # detections=tracked_detections,
             violation=violation,
             violation_count=self._violation_count,
         )
 
 
-        if self.visualizer is not None:
-            annotated_frame = self.visualizer.draw_frame(
-                frame.copy(), tracked_detections, self.roi_manager, violations
-            )
-            return tracked_detections, violations, annotated_frame
-
-        return tracked_detections, violations, None
+        return  annotated_frame
 
     # ── Production broker loop ────────────────────────────────────────────────
 
@@ -136,12 +136,10 @@ class DetectionManager:
  
                         logger.debug("Processing frame_id=%d", frame_id)
 
-                        _, violations, display =  self.on_frame_received(frame, frame_id=frame_id, timestamp=timestamp)
+                        display =  self.on_frame_received(frame, frame_id=frame_id, timestamp=timestamp)
 
                         # Overlay running violation count
-                        if self.visualizer is not None and display is not None:
-                            cv2.putText(display, f"Violations: {len(violations)}", (15, 35), cv2.FONT_HERSHEY_SIMPLEX,
-                                1.0,(0, 0, 255),2,cv2.LINE_AA,)
+                        if self.vis:
 
                             cv2.imshow("Pizza Store — Local Debug", display)
                             key = cv2.waitKey(1) & 0xFF
